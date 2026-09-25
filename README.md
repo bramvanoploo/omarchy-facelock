@@ -28,8 +28,7 @@ omarchy plugin add https://github.com/bramvanoploo/omarchy-facelock.git --enable
 Or manually:
 
 ```bash
-mkdir -p ~/.config/omarchy/plugins/omarchy-facelock
-cp -r * ~/.config/omarchy/plugins/omarchy-facelock/
+git clone https://github.com/bramvanoploo/omarchy-facelock.git ~/.config/omarchy/plugins/omarchy-facelock
 omarchy-shell shell rescanPlugins
 omarchy plugin enable omarchy-facelock --section right
 ```
