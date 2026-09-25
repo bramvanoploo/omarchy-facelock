@@ -1,0 +1,230 @@
+#!/usr/bin/env bash
+set -eo pipefail
+
+check_installed() {
+  if pacman -Q facelock-bin >/dev/null 2>&1; then
+    echo "facelock-bin"
+    return 0
+  fi
+  if pacman -Q facelock >/dev/null 2>&1; then
+    echo "facelock"
+    return 0
+  fi
+  if command -v facelock >/dev/null 2>&1; then
+    echo "facelock"
+    return 0
+  fi
+  return 1
+}
+
+cmd_status() {
+  local pkg
+  if ! pkg=$(check_installed); then
+    cat <<EOF
+{
+  "installed": false,
+  "version": "",
+  "package": "",
+  "configured": false,
+  "enrolled": false,
+  "modelCount": 0,
+  "lastUpdated": null,
+  "daemonRunning": false,
+  "hyprlockIntegrated": false
+}
+EOF
+    return 0
+  fi
+
+  local version
+  version=$(facelock --version 2>/dev/null | awk '{print $2}' || echo "unknown")
+
+  local configured=false
+  if [[ -f /etc/facelock/config.toml ]]; then
+    configured=true
+  fi
+
+  local enrolled=false
+  local model_count=0
+  local last_updated="null"
+
+  # facelock is-enrolled is an unprivileged read and never hangs
+  local enroll_json
+  enroll_json=$(timeout 1.5s facelock is-enrolled --json 2>/dev/null || true)
+  if [[ -n "$enroll_json" ]]; then
+    enrolled=$(jq -r '.enrolled // false' <<<"$enroll_json" 2>/dev/null || echo false)
+    model_count=$(jq -r '.models // 0' <<<"$enroll_json" 2>/dev/null || echo 0)
+    local raw_updated
+    raw_updated=$(jq -r '.updated // empty' <<<"$enroll_json" 2>/dev/null || true)
+    if [[ -n "$raw_updated" && "$raw_updated" != "null" ]]; then
+      last_updated="\"$raw_updated\""
+    fi
+    configured=true
+  fi
+
+  local daemon_running=false
+  if systemctl is-active --quiet facelock 2>/dev/null; then
+    daemon_running=true
+  fi
+
+  local hyprlock_integrated=false
+  if facelock hyprlock status 2>/dev/null | grep -iq "enabled"; then
+    hyprlock_integrated=true
+  elif grep -qs "pam_facelock" /etc/pam.d/hyprlock 2>/dev/null; then
+    hyprlock_integrated=true
+  fi
+
+  cat <<EOF
+{
+  "installed": true,
+  "version": "$version",
+  "package": "$pkg",
+  "configured": $configured,
+  "enrolled": $enrolled,
+  "modelCount": $model_count,
+  "lastUpdated": $last_updated,
+  "daemonRunning": $daemon_running,
+  "hyprlockIntegrated": $hyprlock_integrated
+}
+EOF
+}
+
+cmd_install() {
+  omarchy-launch-floating-terminal-with-presentation "yay -S --noconfirm facelock"
+}
+
+cmd_setup() {
+  omarchy-launch-floating-terminal-with-presentation "sudo facelock setup"
+}
+
+cmd_enroll() {
+  local label="${1:-}"
+  if [[ -n "$label" ]]; then
+    omarchy-launch-floating-terminal-with-presentation "sudo facelock enroll -l \"$label\""
+  else
+    omarchy-launch-floating-terminal-with-presentation "sudo facelock enroll"
+  fi
+}
+
+cmd_test() {
+  omarchy-launch-floating-terminal-with-presentation "sudo facelock test"
+}
+
+cmd_preview() {
+  omarchy-launch-floating-terminal-with-presentation "sudo facelock preview"
+}
+
+cmd_devices() {
+  omarchy-launch-floating-terminal-with-presentation "sudo facelock devices"
+}
+
+cmd_models() {
+  omarchy-launch-floating-terminal-with-presentation "sudo facelock list"
+}
+
+cmd_remove() {
+  local id="$1"
+  if [[ -n "$id" ]]; then
+    omarchy-launch-floating-terminal-with-presentation "sudo facelock remove $id -y"
+  fi
+}
+
+cmd_clear() {
+  omarchy-launch-floating-terminal-with-presentation "sudo facelock clear -y"
+}
+
+cmd_hyprlock_toggle() {
+  if facelock hyprlock status 2>/dev/null | grep -iq "enabled"; then
+    facelock hyprlock disable >/dev/null 2>&1 || true
+  else
+    facelock hyprlock enable >/dev/null 2>&1 || true
+  fi
+}
+
+cmd_daemon_restart() {
+  omarchy-launch-floating-terminal-with-presentation "sudo facelock daemon restart"
+}
+
+cmd_setup_sudoers() {
+  omarchy-launch-floating-terminal-with-presentation "echo 'Configuring passwordless sudo for facelock...'; echo '$USER ALL=(ALL) NOPASSWD: /usr/bin/facelock' | sudo tee /etc/sudoers.d/facelock && sudo chmod 0440 /etc/sudoers.d/facelock && echo 'Done! Sudo confirmation is now automatic for facelock.'"
+}
+
+cmd_run() {
+  local subcommand="$1"
+  shift
+  case "$subcommand" in
+    status)
+      omarchy-launch-floating-terminal-with-presentation "sudo facelock status"
+      ;;
+    tpm)
+      omarchy-launch-floating-terminal-with-presentation "sudo facelock tpm status"
+      ;;
+    bench)
+      omarchy-launch-floating-terminal-with-presentation "sudo facelock bench"
+      ;;
+    audit)
+      omarchy-launch-floating-terminal-with-presentation "sudo facelock audit"
+      ;;
+    config)
+      omarchy-launch-floating-terminal-with-presentation "sudo facelock config"
+      ;;
+    sudoers)
+      cmd_setup_sudoers
+      ;;
+    *)
+      omarchy-launch-floating-terminal-with-presentation "sudo facelock $*"
+      ;;
+  esac
+}
+
+case "${1:-status}" in
+  status)
+    cmd_status
+    ;;
+  devices)
+    cmd_devices
+    ;;
+  models)
+    cmd_models
+    ;;
+  install)
+    cmd_install
+    ;;
+  setup)
+    cmd_setup
+    ;;
+  enroll)
+    shift
+    cmd_enroll "$@"
+    ;;
+  test)
+    cmd_test
+    ;;
+  preview)
+    cmd_preview
+    ;;
+  remove)
+    shift
+    cmd_remove "$@"
+    ;;
+  clear)
+    cmd_clear
+    ;;
+  hyprlock-toggle)
+    cmd_hyprlock_toggle
+    ;;
+  daemon-restart)
+    cmd_daemon_restart
+    ;;
+  setup-sudoers)
+    cmd_setup_sudoers
+    ;;
+  run)
+    shift
+    cmd_run "$@"
+    ;;
+  *)
+    echo "Unknown command: $1" >&2
+    exit 1
+    ;;
+esac

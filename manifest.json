@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "bramvanoploo.facelock",
+  "name": "Omarchy Facelock",
+  "version": "0.1.0",
+  "author": "Bram van Oploo",
+  "license": "MIT",
+  "description": "Install, configure, and manage Facelock biometric authentication from the Omarchy bar.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "activation": "on-demand",
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Facelock",
+    "description": "Biometric face authentication status, setup, enrollment, and testing.",
+    "category": "Security",
+    "defaultSection": "right",
+    "allowMultiple": false
+  }
+}
