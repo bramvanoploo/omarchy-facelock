@@ -2,7 +2,7 @@
 set -eo pipefail
 
 PLUGIN_SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TARGET_DIR="$HOME/.config/omarchy/plugins/bram.facelock"
+TARGET_DIR="$HOME/.config/omarchy/plugins/omarchy-facelock"
 
 echo "Validating plugin..."
 omarchy-plugin-validate "$PLUGIN_SRC"
@@ -21,7 +21,7 @@ echo "Rescanning Omarchy plugins..."
 omarchy-shell shell rescanPlugins
 sleep 1
 
-echo "Enabling bram.facelock widget on the right bar..."
-omarchy plugin enable bram.facelock --section right || true
+echo "Enabling omarchy-facelock widget on the right bar..."
+omarchy plugin enable omarchy-facelock --section right || true
 
 echo "Facelock plugin installed and enabled successfully!"

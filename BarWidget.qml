@@ -7,8 +7,8 @@ import "FacelockModel.js" as Model
 
 Panel {
   id: root
-  moduleName: "bram.facelock"
-  ipcTarget: "bram.facelock"
+  moduleName: "omarchy-facelock"
+  ipcTarget: "omarchy-facelock"
   manageIpc: false
 
   property var status: Model.emptyStatus()
@@ -131,7 +131,7 @@ Panel {
     open: root.opened
     focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Style.space(380))
-    contentHeight: panel.fittedContentHeight(column.implicitHeight)
+    contentHeight: panel.fittedContentHeight(Math.max(column.implicitHeight, Style.space(360)))
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -248,9 +248,9 @@ Panel {
 
           Button {
             width: parent.width
-            text: "Install Facelock (yay -S facelock)"
+            text: "Install Facelock (yay -S facelock-bin)"
             iconText: "󰇚"
-            tooltipText: "Install Facelock via AUR"
+            tooltipText: "Backup PAM and install"
             bordered: true
             accent: root.accent
             onClicked: root.runAction("install")
@@ -285,7 +285,7 @@ Panel {
             readonly property real cellWidth: (width - spacing) / 2
 
             Button {
-              width: parent.cellWidth
+              width: root.status.enrolled ? parent.cellWidth : parent.width
               text: "Enroll Face"
               iconText: "󰱻"
               tooltipText: "Capture and enroll face"
@@ -294,6 +294,7 @@ Panel {
             }
 
             Button {
+              visible: root.status.enrolled
               width: parent.cellWidth
               text: "Test Recognition"
               iconText: "󰄬"
@@ -304,6 +305,7 @@ Panel {
           }
 
           Row {
+            visible: root.status.enrolled
             width: parent.width
             spacing: Style.space(8)
             readonly property real cellWidth: (width - spacing) / 2
@@ -498,6 +500,57 @@ Panel {
                     tooltipText: "Run performance calibration benchmarks"
                     bordered: true
                     onClicked: root.runAction("run", "bench")
+                  }
+                }
+
+                Button {
+                  visible: false
+                  width: parent.width
+                  text: "Edit Configuration"
+                  iconText: "󰏫"
+                  tooltipText: "Edit config.toml with sudo"
+                  bordered: true
+                  onClicked: root.runAction("edit-config")
+                }
+
+                PanelSeparator {
+                  width: parent.width
+                  foreground: root.foreground
+                }
+
+                Row {
+                  width: parent.width
+                  spacing: Style.space(8)
+                  readonly property real cellWidth: (width - spacing) / 2
+
+                  Button {
+                    width: parent.cellWidth
+                    text: "Backup PAM"
+                    iconText: "󰁯"
+                    tooltipText: "Create fresh PAM backup"
+                    bordered: true
+                    onClicked: root.runAction("backup-pam-user")
+                  }
+
+                  Button {
+                    width: parent.cellWidth
+                    text: "Restore PAM"
+                    iconText: "󰜉"
+                    tooltipText: "Restore PAM from backup"
+                    bordered: true
+                    onClicked: root.runAction("restore-pam-menu")
+                  }
+                }
+
+                Button {
+                  width: parent.width
+                  text: "Uninstall Facelock"
+                  iconText: "󰆴"
+                  tooltipText: "Uninstall and restore PAM"
+                  bordered: true
+                  accent: Color.urgent
+                  onClicked: {
+                    root.askConfirmation("Are you sure you want to uninstall Facelock and restore PAM configuration?", "Uninstall", function() { root.runAction("uninstall") })
                   }
                 }
               }

@@ -89,8 +89,229 @@ EOF
 EOF
 }
 
+BACKUP_BASE="${HOME}/.local/state/omarchy/facelock/pam-backups"
+
+backup_pam() {
+  local tag="${1:-manual}"
+  local timestamp
+  timestamp=$(date +%Y%m%d_%H%M%S)
+  local name="pam-${timestamp}-${tag}"
+  local target="${BACKUP_BASE}/${name}"
+
+  mkdir -p "$target"
+  cp -a /etc/pam.d/. "$target/"
+  local count
+  count=$(find "$target" -type f | grep -v meta.json | wc -l)
+
+  cat > "$target/meta.json" <<EOF
+{
+  "id": "$name",
+  "tag": "$tag",
+  "timestamp": "$timestamp",
+  "date": "$(date -Iseconds)",
+  "fileCount": $count
+}
+EOF
+
+  if [[ "$tag" == "pre-install" ]]; then
+    ln -sfn "$name" "${BACKUP_BASE}/pre-install"
+  fi
+  ln -sfn "$name" "${BACKUP_BASE}/latest"
+
+  echo "$target"
+}
+
 cmd_install() {
-  omarchy-launch-floating-terminal-with-presentation "yay -S --noconfirm facelock"
+  local helper_path="$0"
+  omarchy-launch-floating-terminal-with-presentation "echo '=== Facelock Installation ==='; echo ''; echo 'Step 1/2: Backing up /etc/pam.d before installation...'; target=\$(bash '$helper_path' backup-pam pre-install) && echo \"✓ PAM backup saved to: \$target\" && echo '' && echo 'Step 2/2: Installing facelock-bin via yay...' && yay -S --noconfirm facelock-bin && echo '' && echo '✓ Installation complete.' && sleep 2"
+}
+
+cmd_backup_pam_user() {
+  local helper_path="$0"
+  omarchy-launch-floating-terminal-with-presentation "echo '=== Create PAM Backup ==='; echo ''; echo 'Backing up all files in /etc/pam.d...'; target=\$(bash '$helper_path' backup-pam manual) && echo \"✓ PAM backup created at: \$target\" && echo \"✓ Total \$(find \"\$target\" -type f | grep -v meta.json | wc -l) files backed up.\" && sleep 2"
+}
+
+do_restore_pam() {
+  echo "=== Restore PAM Configuration ==="
+  echo ""
+  mkdir -p "$BACKUP_BASE"
+
+  local backups=()
+  while IFS= read -r dir; do
+    [[ -n "$dir" && -d "$dir" ]] && backups+=("$(basename "$dir")")
+  done < <(find "$BACKUP_BASE" -mindepth 1 -maxdepth 1 -type d -name "pam-*" 2>/dev/null | sort -r)
+
+  if [[ ${#backups[@]} -eq 0 ]]; then
+    echo "No PAM backups found in $BACKUP_BASE."
+    echo ""
+    read -rp "Press Enter to close..."
+    return 1
+  fi
+
+  echo "Available PAM backups:"
+  local chosen=""
+  if command -v gum >/dev/null 2>&1; then
+    chosen=$(gum choose --header="Select PAM backup to restore to /etc/pam.d:" "${backups[@]}" "Cancel")
+    if [[ -z "$chosen" || "$chosen" == "Cancel" ]]; then
+      echo "Restore cancelled."
+      sleep 1
+      return 0
+    fi
+  else
+    PS3="Select backup number (or Cancel): "
+    select b in "${backups[@]}" "Cancel"; do
+      if [[ "$b" == "Cancel" || -z "$b" ]]; then
+        echo "Restore cancelled."
+        return 0
+      fi
+      chosen="$b"
+      break
+    done
+  fi
+
+  echo ""
+  echo "Selected backup: $chosen"
+  if command -v gum >/dev/null 2>&1; then
+    if ! gum confirm "Are you sure you want to restore /etc/pam.d from $chosen?"; then
+      echo "Restore cancelled."
+      sleep 1
+      return 0
+    fi
+  else
+    read -rp "Are you sure you want to restore /etc/pam.d from $chosen? [y/N]: " confirm
+    [[ "$confirm" =~ ^[Yy]$ ]] || { echo "Restore cancelled."; return 0; }
+  fi
+
+  echo ""
+  echo "Restoring PAM configuration from $chosen (requires sudo)..."
+  sudo cp -a "$BACKUP_BASE/$chosen/." /etc/pam.d/
+  echo "✓ PAM configuration has been successfully restored from $chosen."
+  sleep 2
+}
+
+cmd_restore_pam() {
+  local helper_path="$0"
+  omarchy-launch-floating-terminal-with-presentation "bash '$helper_path' do-restore-pam"
+}
+
+do_uninstall() {
+  echo "=== Uninstall Facelock & Restore PAM ==="
+  echo ""
+
+  # 1. Disable hyprlock if configured
+  if command -v facelock >/dev/null 2>&1; then
+    if facelock hyprlock status 2>/dev/null | grep -iq "enabled"; then
+      echo "Disabling Facelock in Hyprlock..."
+      sudo facelock hyprlock disable 2>/dev/null || true
+    fi
+  fi
+
+  # 2. Stop and disable daemon if active
+  if systemctl is-active --quiet facelock 2>/dev/null || systemctl is-enabled --quiet facelock 2>/dev/null; then
+    echo "Stopping and disabling facelock daemon..."
+    sudo systemctl disable --now facelock 2>/dev/null || true
+  fi
+
+  # 3. Restore PAM backup if available
+  local pam_restored=false
+  local target_backup=""
+
+  if [[ -L "$BACKUP_BASE/pre-install" && -d "$BACKUP_BASE/pre-install" ]]; then
+    target_backup="$BACKUP_BASE/pre-install"
+  elif [[ -L "$BACKUP_BASE/latest" && -d "$BACKUP_BASE/latest" ]]; then
+    target_backup="$BACKUP_BASE/latest"
+  else
+    target_backup=$(find "$BACKUP_BASE" -mindepth 1 -maxdepth 1 -type d -name "pam-*" 2>/dev/null | sort -r | head -n 1)
+  fi
+
+  if [[ -n "$target_backup" && -d "$target_backup" ]]; then
+    local bname
+    bname=$(basename "$(readlink -f "$target_backup" 2>/dev/null || echo "$target_backup")")
+    echo "Restoring PAM configuration from backup: $bname..."
+    sudo cp -a "$target_backup/." /etc/pam.d/
+    pam_restored=true
+    echo "✓ Original PAM files restored."
+  else
+    echo "Notice: No PAM backup found in $BACKUP_BASE."
+    echo "Cleaning up any remaining pam_facelock lines in /etc/pam.d/..."
+    sudo sed -i '/pam_facelock\.so/d' /etc/pam.d/* 2>/dev/null || true
+  fi
+
+  # 4. Uninstall facelock package
+  echo ""
+  echo "Uninstalling facelock-bin..."
+  if pacman -Q facelock-bin >/dev/null 2>&1; then
+    sudo pacman -Rns --noconfirm facelock-bin
+  elif pacman -Q facelock >/dev/null 2>&1; then
+    sudo pacman -Rns --noconfirm facelock
+  fi
+
+  # 5. Clean up sudoers rule if present
+  if [[ -f /etc/sudoers.d/facelock ]]; then
+    sudo rm -f /etc/sudoers.d/facelock
+  fi
+
+  echo ""
+  echo "✓ Facelock uninstalled successfully."
+  if [[ "$pam_restored" == "true" ]]; then
+    echo "✓ PAM configuration restored."
+  fi
+  sleep 2
+}
+
+cmd_uninstall() {
+  local helper_path="$0"
+  omarchy-launch-floating-terminal-with-presentation "bash '$helper_path' do-uninstall"
+}
+
+do_edit_config() {
+  local cfg="/etc/facelock/config.toml"
+  if [[ ! -f "$cfg" ]]; then
+    sudo mkdir -p /etc/facelock
+    sudo touch "$cfg"
+    sudo chmod 0644 "$cfg"
+  fi
+
+  local default_editor="$HOME/.local/state/omarchy/defaults/editor"
+  local ed=""
+  [[ -f "$default_editor" ]] && read -r ed <"$default_editor"
+  : "${ed:=${EDITOR:-nvim}}"
+  [[ "$ed" == *"omarchy-launch-editor"* && -f "$default_editor" ]] && read -r ed <"$default_editor"
+
+  echo "=== Edit Facelock Configuration ==="
+  echo "File: $cfg"
+  echo "Editor: $ed"
+  echo ""
+
+  case "${ed##*/}" in
+    zed | zeditor)
+      echo "Opening in Zed..."
+      SUDO_EDITOR="zeditor --wait" sudoedit "$cfg"
+      echo "✓ Configuration saved."
+      sleep 1
+      ;;
+    code | codium | vscodium)
+      echo "Opening in $ed..."
+      SUDO_EDITOR="${ed} --wait" sudoedit "$cfg"
+      echo "✓ Configuration saved."
+      sleep 1
+      ;;
+    nvim | vim | nano | micro | hx | helix | fresh)
+      sudo "$ed" "$cfg"
+      ;;
+    *)
+      if command -v "$ed" >/dev/null 2>&1; then
+        sudo "$ed" "$cfg" 2>/dev/null || SUDO_EDITOR="$ed" sudoedit "$cfg"
+      else
+        sudo nano "$cfg"
+      fi
+      ;;
+  esac
+}
+
+cmd_edit_config() {
+  local helper_path="$0"
+  omarchy-launch-floating-terminal-with-presentation "bash '$helper_path' do-edit-config"
 }
 
 cmd_setup() {
@@ -218,6 +439,31 @@ case "${1:-status}" in
     ;;
   setup-sudoers)
     cmd_setup_sudoers
+    ;;
+  backup-pam)
+    shift
+    backup_pam "$@"
+    ;;
+  backup-pam-user)
+    cmd_backup_pam_user
+    ;;
+  restore-pam-menu)
+    cmd_restore_pam
+    ;;
+  do-restore-pam)
+    do_restore_pam
+    ;;
+  uninstall)
+    cmd_uninstall
+    ;;
+  do-uninstall)
+    do_uninstall
+    ;;
+  edit-config)
+    cmd_edit_config
+    ;;
+  do-edit-config)
+    do_edit_config
     ;;
   run)
     shift
