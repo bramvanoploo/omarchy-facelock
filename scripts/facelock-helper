@@ -121,14 +121,40 @@ EOF
   echo "$target"
 }
 
+launch_terminal() {
+  local cmd="$*"
+  if [[ -r "$(command -v omarchy-restart-gum 2>/dev/null)" ]]; then
+    # shellcheck source=/dev/null
+    source omarchy-restart-gum
+  fi
+
+  local presentation_script="omarchy-show-logo; $cmd; if (( \$? != 130 )); then omarchy-show-done; fi"
+
+  # Ensure the stay_focused rule is loaded in the compositor
+  hyprctl eval 'o.window({ class = "^(org.omarchy.terminal)$", title = "^(Omarchy Facelock.*)$" }, { stay_focused = true })' >/dev/null 2>&1 || true
+
+  setsid uwsm-app -- xdg-terminal-exec --app-id=org.omarchy.terminal --title="Omarchy Facelock" -e bash -c "$presentation_script" >/dev/null 2>&1 &
+
+  # Proactively focus the terminal as soon as it maps
+  (
+    for _ in {1..20}; do
+      if hyprctl clients -j 2>/dev/null | jq -e '.[] | select(.class == "org.omarchy.terminal" and (.title | startswith("Omarchy Facelock")))' >/dev/null 2>&1; then
+        hyprctl dispatch focuswindow "title:^Omarchy Facelock" >/dev/null 2>&1 || true
+        break
+      fi
+      sleep 0.05
+    done
+  ) &
+}
+
 cmd_install() {
   local helper_path="$0"
-  omarchy-launch-floating-terminal-with-presentation "echo '=== Facelock Installation ==='; echo ''; echo 'Step 1/2: Backing up /etc/pam.d before installation...'; target=\$(bash '$helper_path' backup-pam pre-install) && echo \"✓ PAM backup saved to: \$target\" && echo '' && echo 'Step 2/2: Installing facelock-bin via yay...' && yay -S --noconfirm facelock-bin && echo '' && echo '✓ Installation complete.' && sleep 2"
+  launch_terminal "echo '=== Facelock Installation ==='; echo ''; echo 'Step 1/2: Backing up /etc/pam.d before installation...'; target=\$(bash '$helper_path' backup-pam pre-install) && echo \"✓ PAM backup saved to: \$target\" && echo '' && echo 'Step 2/2: Installing facelock-bin via yay...' && yay -S --noconfirm facelock-bin && echo '' && echo '✓ Installation complete.' && sleep 2"
 }
 
 cmd_backup_pam_user() {
   local helper_path="$0"
-  omarchy-launch-floating-terminal-with-presentation "echo '=== Create PAM Backup ==='; echo ''; echo 'Backing up all files in /etc/pam.d...'; target=\$(bash '$helper_path' backup-pam manual) && echo \"✓ PAM backup created at: \$target\" && echo \"✓ Total \$(find \"\$target\" -type f | grep -v meta.json | wc -l) files backed up.\" && sleep 2"
+  launch_terminal "echo '=== Create PAM Backup ==='; echo ''; echo 'Backing up all files in /etc/pam.d...'; target=\$(bash '$helper_path' backup-pam manual) && echo \"✓ PAM backup created at: \$target\" && echo \"✓ Total \$(find \"\$target\" -type f | grep -v meta.json | wc -l) files backed up.\" && sleep 2"
 }
 
 do_restore_pam() {
@@ -191,7 +217,7 @@ do_restore_pam() {
 
 cmd_restore_pam() {
   local helper_path="$0"
-  omarchy-launch-floating-terminal-with-presentation "bash '$helper_path' do-restore-pam"
+  launch_terminal "bash '$helper_path' do-restore-pam"
 }
 
 do_uninstall() {
@@ -261,7 +287,7 @@ do_uninstall() {
 
 cmd_uninstall() {
   local helper_path="$0"
-  omarchy-launch-floating-terminal-with-presentation "bash '$helper_path' do-uninstall"
+  launch_terminal "bash '$helper_path' do-uninstall"
 }
 
 do_edit_config() {
@@ -311,47 +337,47 @@ do_edit_config() {
 
 cmd_edit_config() {
   local helper_path="$0"
-  omarchy-launch-floating-terminal-with-presentation "bash '$helper_path' do-edit-config"
+  launch_terminal "bash '$helper_path' do-edit-config"
 }
 
 cmd_setup() {
-  omarchy-launch-floating-terminal-with-presentation "sudo facelock setup"
+  launch_terminal "sudo facelock setup"
 }
 
 cmd_enroll() {
   local label="${1:-}"
   if [[ -n "$label" ]]; then
-    omarchy-launch-floating-terminal-with-presentation "sudo facelock enroll -l \"$label\""
+    launch_terminal "sudo facelock enroll -l \"$label\""
   else
-    omarchy-launch-floating-terminal-with-presentation "sudo facelock enroll"
+    launch_terminal "sudo facelock enroll"
   fi
 }
 
 cmd_test() {
-  omarchy-launch-floating-terminal-with-presentation "sudo facelock test"
+  launch_terminal "sudo facelock test"
 }
 
 cmd_preview() {
-  omarchy-launch-floating-terminal-with-presentation "sudo facelock preview"
+  launch_terminal "sudo facelock preview"
 }
 
 cmd_devices() {
-  omarchy-launch-floating-terminal-with-presentation "sudo facelock devices"
+  launch_terminal "sudo facelock devices"
 }
 
 cmd_models() {
-  omarchy-launch-floating-terminal-with-presentation "sudo facelock list"
+  launch_terminal "sudo facelock list"
 }
 
 cmd_remove() {
   local id="$1"
   if [[ -n "$id" ]]; then
-    omarchy-launch-floating-terminal-with-presentation "sudo facelock remove $id -y"
+    launch_terminal "sudo facelock remove $id -y"
   fi
 }
 
 cmd_clear() {
-  omarchy-launch-floating-terminal-with-presentation "sudo facelock clear -y"
+  launch_terminal "sudo facelock clear -y"
 }
 
 cmd_hyprlock_toggle() {
@@ -363,11 +389,11 @@ cmd_hyprlock_toggle() {
 }
 
 cmd_daemon_restart() {
-  omarchy-launch-floating-terminal-with-presentation "sudo facelock daemon restart"
+  launch_terminal "sudo facelock daemon restart"
 }
 
 cmd_setup_sudoers() {
-  omarchy-launch-floating-terminal-with-presentation "echo 'Configuring passwordless sudo for facelock...'; echo '$USER ALL=(ALL) NOPASSWD: /usr/bin/facelock' | sudo tee /etc/sudoers.d/facelock && sudo chmod 0440 /etc/sudoers.d/facelock && echo 'Done! Sudo confirmation is now automatic for facelock.'"
+  launch_terminal "echo 'Configuring passwordless sudo for facelock...'; echo '$USER ALL=(ALL) NOPASSWD: /usr/bin/facelock' | sudo tee /etc/sudoers.d/facelock && sudo chmod 0440 /etc/sudoers.d/facelock && echo 'Done! Sudo confirmation is now automatic for facelock.'"
 }
 
 cmd_run() {
@@ -375,25 +401,25 @@ cmd_run() {
   shift
   case "$subcommand" in
     status)
-      omarchy-launch-floating-terminal-with-presentation "sudo facelock status"
+      launch_terminal "sudo facelock status"
       ;;
     tpm)
-      omarchy-launch-floating-terminal-with-presentation "sudo facelock tpm status"
+      launch_terminal "sudo facelock tpm status"
       ;;
     bench)
-      omarchy-launch-floating-terminal-with-presentation "sudo facelock bench"
+      launch_terminal "sudo facelock bench"
       ;;
     audit)
-      omarchy-launch-floating-terminal-with-presentation "sudo facelock audit"
+      launch_terminal "sudo facelock audit"
       ;;
     config)
-      omarchy-launch-floating-terminal-with-presentation "sudo facelock config"
+      launch_terminal "sudo facelock config"
       ;;
     sudoers)
       cmd_setup_sudoers
       ;;
     *)
-      omarchy-launch-floating-terminal-with-presentation "sudo facelock $*"
+      launch_terminal "sudo facelock $*"
       ;;
   esac
 }
