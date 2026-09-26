@@ -10,7 +10,8 @@ function emptyStatus() {
     modelCount: 0,
     lastUpdated: null,
     daemonRunning: false,
-    hyprlockIntegrated: false
+    hyprlockIntegrated: false,
+    requireIr: true
   }
 }
 
@@ -31,6 +32,7 @@ function parseStatus(raw) {
     base.lastUpdated = parsed.lastUpdated || null
     base.daemonRunning = Boolean(parsed.daemonRunning)
     base.hyprlockIntegrated = Boolean(parsed.hyprlockIntegrated)
+    base.requireIr = parsed.requireIr !== undefined ? Boolean(parsed.requireIr) : true
     return base
   } catch (e) {
     return base

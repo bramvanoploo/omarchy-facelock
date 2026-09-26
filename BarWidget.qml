@@ -41,7 +41,7 @@ Panel {
     if (arg !== undefined && arg !== "") cmd.push(arg)
     actionProc.command = cmd
     actionProc.running = true
-    if (action !== "hyprlock-toggle") {
+    if (action !== "hyprlock-toggle" && action !== "require-ir-toggle") {
       toolsOverlayOpen = false
       root.close()
     }
@@ -131,7 +131,7 @@ Panel {
     open: root.opened
     focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Style.space(380))
-    contentHeight: panel.fittedContentHeight(Math.max(column.implicitHeight, Style.space(360)))
+    contentHeight: panel.fittedContentHeight(Math.max(column.implicitHeight, Style.space(380)))
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -240,7 +240,7 @@ Panel {
           Text {
             width: parent.width
             wrapMode: Text.WordWrap
-            text: "Facelock is an open-source face authentication system for Linux. Click below to install it using yay."
+            text: "Facelock is an open-source face authentication system for Linux. Click below to install it."
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.body
@@ -248,7 +248,7 @@ Panel {
 
           Button {
             width: parent.width
-            text: "Install Facelock (yay -S facelock-bin)"
+            text: "Install Facelock"
             iconText: "󰇚"
             tooltipText: "Backup PAM and install"
             bordered: true
@@ -500,6 +500,19 @@ Panel {
                     tooltipText: "Run performance calibration benchmarks"
                     bordered: true
                     onClicked: root.runAction("run", "bench")
+                  }
+                }
+
+                Button {
+                  width: parent.width
+                  text: "Require IR camera"
+                  iconText: root.status.requireIr ? "󰄲" : "󰄱"
+                  tooltipText: "Uncheck this option if you don't have an infrared camera but still want to face-unlock. This won't work well in darker environments!"
+                  bordered: true
+                  selected: root.status.requireIr
+                  onClicked: {
+                    root.status.requireIr = !root.status.requireIr
+                    root.runAction("require-ir-toggle")
                   }
                 }
 

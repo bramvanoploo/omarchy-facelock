@@ -17,6 +17,22 @@ check_installed() {
   return 1
 }
 
+get_require_ir() {
+  local cfg="/etc/facelock/config.toml"
+  if [[ -f "$cfg" ]]; then
+    local val
+    val=$(grep -E '^[[:space:]]*require_ir[[:space:]]*=' "$cfg" 2>/dev/null | tail -n 1 | sed -E 's/^[[:space:]]*require_ir[[:space:]]*=[[:space:]]*//; s/[[:space:]]*#.*$//' | tr -d '[:space:]')
+    if [[ "$val" == "false" ]]; then
+      echo "false"
+      return 0
+    elif [[ "$val" == "true" ]]; then
+      echo "true"
+      return 0
+    fi
+  fi
+  echo "true"
+}
+
 cmd_status() {
   local pkg
   if ! pkg=$(check_installed); then
@@ -30,7 +46,8 @@ cmd_status() {
   "modelCount": 0,
   "lastUpdated": null,
   "daemonRunning": false,
-  "hyprlockIntegrated": false
+  "hyprlockIntegrated": false,
+  "requireIr": true
 }
 EOF
     return 0
@@ -74,6 +91,9 @@ EOF
     hyprlock_integrated=true
   fi
 
+  local require_ir
+  require_ir=$(get_require_ir)
+
   cat <<EOF
 {
   "installed": true,
@@ -84,12 +104,26 @@ EOF
   "modelCount": $model_count,
   "lastUpdated": $last_updated,
   "daemonRunning": $daemon_running,
-  "hyprlockIntegrated": $hyprlock_integrated
+  "hyprlockIntegrated": $hyprlock_integrated,
+  "requireIr": $require_ir
 }
 EOF
 }
 
-BACKUP_BASE="${HOME}/.local/state/omarchy/facelock/pam-backups"
+: "${BACKUP_BASE:=${HOME}/.local/state/omarchy/facelock/pam-backups}"
+
+has_initial_pam_backup() {
+  if [[ -d "${BACKUP_BASE}/initial" ]]; then
+    return 0
+  fi
+  if [[ -d "${BACKUP_BASE}/pre-install" ]]; then
+    return 0
+  fi
+  if find "$BACKUP_BASE" -mindepth 1 -maxdepth 1 -type d \( -name "pam-*-initial" -o -name "pam-*-pre-install" \) 2>/dev/null | grep -q .; then
+    return 0
+  fi
+  return 1
+}
 
 backup_pam() {
   local tag="${1:-manual}"
@@ -113,8 +147,18 @@ backup_pam() {
 }
 EOF
 
-  if [[ "$tag" == "pre-install" ]]; then
-    ln -sfn "$name" "${BACKUP_BASE}/pre-install"
+  if [[ "$tag" == "pre-install" || "$tag" == "initial" ]]; then
+    if [[ ! -e "${BACKUP_BASE}/initial" ]]; then
+      ln -sfn "$name" "${BACKUP_BASE}/initial"
+    fi
+    if [[ ! -e "${BACKUP_BASE}/pre-install" ]]; then
+      ln -sfn "$name" "${BACKUP_BASE}/pre-install"
+    fi
+    if [[ "$tag" == "initial" ]]; then
+      ln -sfn "$name" "${BACKUP_BASE}/initial"
+    elif [[ "$tag" == "pre-install" ]]; then
+      ln -sfn "$name" "${BACKUP_BASE}/pre-install"
+    fi
   fi
   ln -sfn "$name" "${BACKUP_BASE}/latest"
 
@@ -242,9 +286,11 @@ do_uninstall() {
   local pam_restored=false
   local target_backup=""
 
-  if [[ -L "$BACKUP_BASE/pre-install" && -d "$BACKUP_BASE/pre-install" ]]; then
+  if [[ -d "$BACKUP_BASE/initial" ]]; then
+    target_backup="$BACKUP_BASE/initial"
+  elif [[ -d "$BACKUP_BASE/pre-install" ]]; then
     target_backup="$BACKUP_BASE/pre-install"
-  elif [[ -L "$BACKUP_BASE/latest" && -d "$BACKUP_BASE/latest" ]]; then
+  elif [[ -d "$BACKUP_BASE/latest" ]]; then
     target_backup="$BACKUP_BASE/latest"
   else
     target_backup=$(find "$BACKUP_BASE" -mindepth 1 -maxdepth 1 -type d -name "pam-*" 2>/dev/null | sort -r | head -n 1)
@@ -340,8 +386,24 @@ cmd_edit_config() {
   launch_terminal "bash '$helper_path' do-edit-config"
 }
 
+do_setup() {
+  if ! has_initial_pam_backup; then
+    echo "=== Initial PAM Backup ==="
+    echo "No initial backup of /etc/pam.d was found."
+    echo "Creating initial backup before running setup wizard..."
+    local target
+    target=$(backup_pam initial)
+    echo "✓ Initial PAM backup created at: $target"
+    echo ""
+  fi
+  echo "=== Launching Facelock Setup Wizard ==="
+  echo ""
+  sudo facelock setup
+}
+
 cmd_setup() {
-  launch_terminal "sudo facelock setup"
+  local helper_path="$0"
+  launch_terminal "bash '$helper_path' do-setup"
 }
 
 cmd_enroll() {
@@ -386,6 +448,57 @@ cmd_hyprlock_toggle() {
   else
     facelock hyprlock enable >/dev/null 2>&1 || true
   fi
+}
+
+do_set_require_ir() {
+  local new_val="$1"
+  local cfg="/etc/facelock/config.toml"
+  local sudo_cmd=""
+  if [[ $EUID -ne 0 ]]; then
+    sudo_cmd="sudo"
+  fi
+
+  if [[ ! -f "$cfg" ]]; then
+    $sudo_cmd mkdir -p /etc/facelock
+    echo "require_ir = $new_val" | $sudo_cmd tee "$cfg" >/dev/null
+    return $?
+  fi
+
+  if grep -qE '^[#[:space:]]*require_ir[[:space:]]*=' "$cfg"; then
+    $sudo_cmd sed -i -E "s/^[#[:space:]]*require_ir[[:space:]]*=.*/require_ir = $new_val/" "$cfg"
+  else
+    printf '\nrequire_ir = %s\n' "$new_val" | $sudo_cmd tee -a "$cfg" >/dev/null
+  fi
+
+  if systemctl is-active --quiet facelock 2>/dev/null; then
+    $sudo_cmd systemctl restart facelock 2>/dev/null || true
+  fi
+}
+
+cmd_require_ir_toggle() {
+  local current
+  current=$(get_require_ir)
+  local new_val="true"
+  if [[ "$current" == "true" ]]; then
+    new_val="false"
+  fi
+
+  # Attempt passwordless sudo first
+  if sudo -n true 2>/dev/null; then
+    do_set_require_ir "$new_val"
+    return $?
+  fi
+
+  # Desktop polkit agent prompt via pkexec
+  if command -v pkexec >/dev/null 2>&1; then
+    if pkexec bash -c "$(declare -f do_set_require_ir); do_set_require_ir $new_val" 2>/dev/null; then
+      return 0
+    fi
+  fi
+
+  # Terminal presentation fallback
+  local helper_path="$0"
+  launch_terminal "echo 'Updating require_ir in /etc/facelock/config.toml...'; sudo bash -c \"\$(declare -f do_set_require_ir); do_set_require_ir $new_val\" && echo '✓ require_ir set to $new_val' && sleep 1"
 }
 
 cmd_daemon_restart() {
@@ -437,8 +550,14 @@ case "${1:-status}" in
   install)
     cmd_install
     ;;
+  has-initial-backup)
+    has_initial_pam_backup
+    ;;
   setup)
     cmd_setup
+    ;;
+  do-setup)
+    do_setup
     ;;
   enroll)
     shift
@@ -490,6 +609,13 @@ case "${1:-status}" in
     ;;
   do-edit-config)
     do_edit_config
+    ;;
+  require-ir-toggle)
+    cmd_require_ir_toggle
+    ;;
+  set-require-ir)
+    shift
+    do_set_require_ir "$@"
     ;;
   run)
     shift
