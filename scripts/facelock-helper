@@ -290,7 +290,16 @@ do_uninstall() {
   echo "=== Uninstall Facelock & Restore PAM ==="
   echo ""
 
-  # 1. Disable hyprlock if configured
+  # 1. Clear all enrolled face models before starting the uninstall
+  if command -v facelock >/dev/null 2>&1; then
+    echo "Clearing all enrolled face models..."
+    local target_user="${SUDO_USER:-${USER:-$(id -un)}}"
+    sudo facelock clear -u "$target_user" -y 2>/dev/null || sudo facelock clear -y 2>/dev/null || true
+    echo "✓ Enrolled face models cleared."
+    echo ""
+  fi
+
+  # 2. Disable hyprlock if configured
   if command -v facelock >/dev/null 2>&1; then
     if facelock hyprlock status 2>/dev/null | grep -iq "enabled"; then
       echo "Disabling Facelock in Hyprlock..."
@@ -298,13 +307,13 @@ do_uninstall() {
     fi
   fi
 
-  # 2. Stop and disable daemon if active
+  # 3. Stop and disable daemon if active
   if systemctl is-active --quiet facelock 2>/dev/null || systemctl is-enabled --quiet facelock 2>/dev/null; then
     echo "Stopping and disabling facelock daemon..."
     sudo systemctl disable --now facelock 2>/dev/null || true
   fi
 
-  # 3. Restore PAM backup if available
+  # 4. Restore PAM backup if available
   local pam_restored=false
   local target_backup=""
 
@@ -331,7 +340,7 @@ do_uninstall() {
     sudo sed -i '/pam_facelock\.so/d' /etc/pam.d/* 2>/dev/null || true
   fi
 
-  # 4. Uninstall facelock package
+  # 5. Uninstall facelock package
   echo ""
   echo "Uninstalling facelock-bin..."
   if pacman -Q facelock-bin >/dev/null 2>&1; then
@@ -340,7 +349,13 @@ do_uninstall() {
     sudo pacman -Rns --noconfirm facelock
   fi
 
-  # 5. Clean up sudoers rule if present
+  # 6. Remove any remaining enrolled face data and database files
+  echo ""
+  echo "Removing any remaining enrolled face data..."
+  sudo rm -rf /var/lib/facelock/enrolled /var/lib/facelock/facelock.db* 2>/dev/null || true
+  echo "✓ Enrolled faces data removed."
+
+  # 7. Clean up sudoers rule if present
   if [[ -f /etc/sudoers.d/facelock ]]; then
     sudo rm -f /etc/sudoers.d/facelock
   fi
