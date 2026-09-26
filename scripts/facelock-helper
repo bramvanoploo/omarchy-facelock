@@ -191,9 +191,31 @@ launch_terminal() {
   ) &
 }
 
+do_install() {
+  echo "=== Facelock Installation ==="
+  echo ""
+  echo "Step 1/2: Backing up /etc/pam.d before installation..."
+  local target
+  target=$(backup_pam pre-install)
+  echo "✓ PAM backup saved to: $target"
+  echo ""
+  echo "Step 2/2: Installing facelock-bin via yay..."
+  if yay -S --noconfirm facelock-bin; then
+    echo ""
+    echo "✓ Installation complete."
+    echo ""
+    sleep 1
+    do_setup
+  else
+    echo ""
+    echo "Installation failed. Please check the output above."
+    return 1
+  fi
+}
+
 cmd_install() {
   local helper_path="$0"
-  launch_terminal "echo '=== Facelock Installation ==='; echo ''; echo 'Step 1/2: Backing up /etc/pam.d before installation...'; target=\$(bash '$helper_path' backup-pam pre-install) && echo \"✓ PAM backup saved to: \$target\" && echo '' && echo 'Step 2/2: Installing facelock-bin via yay...' && yay -S --noconfirm facelock-bin && echo '' && echo '✓ Installation complete.' && sleep 2"
+  launch_terminal "bash '$helper_path' do-install"
 }
 
 cmd_backup_pam_user() {
@@ -549,6 +571,9 @@ case "${1:-status}" in
     ;;
   install)
     cmd_install
+    ;;
+  do-install)
+    do_install
     ;;
   has-initial-backup)
     has_initial_pam_backup
