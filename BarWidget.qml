@@ -7,8 +7,8 @@ import "FacelockModel.js" as Model
 
 Panel {
   id: root
-  moduleName: "omarchy-facelock"
-  ipcTarget: "omarchy-facelock"
+  moduleName: "bramvanoploo.omarchy-facelock"
+  ipcTarget: "bramvanoploo.omarchy-facelock"
   manageIpc: false
 
   property var status: Model.emptyStatus()

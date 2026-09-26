@@ -21,7 +21,8 @@ echo "Rescanning Omarchy plugins..."
 omarchy-shell shell rescanPlugins
 sleep 1
 
-echo "Enabling omarchy-facelock widget on the right bar..."
-omarchy plugin enable omarchy-facelock --section right || true
+PLUGIN_ID=$(jq -r .id "$PLUGIN_SRC/manifest.json")
+echo "Enabling $PLUGIN_ID widget on the right bar..."
+omarchy plugin enable "$PLUGIN_ID" --section right || true
 
 echo "Facelock plugin installed and enabled successfully!"
