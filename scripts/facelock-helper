@@ -408,6 +408,69 @@ cmd_edit_config() {
   launch_terminal "bash '$helper_path' do-edit-config"
 }
 
+do_set_require_ir() {
+  local new_val="$1"
+  local cfg="/etc/facelock/config.toml"
+  local sudo_cmd=""
+  if [[ $EUID -ne 0 ]]; then
+    sudo_cmd="sudo"
+  fi
+
+  if [[ ! -f "$cfg" ]]; then
+    $sudo_cmd mkdir -p /etc/facelock
+    printf '[security]\nrequire_ir = %s\n' "$new_val" | $sudo_cmd tee "$cfg" >/dev/null
+    return $?
+  fi
+
+  if grep -qE '^[#[:space:]]*require_ir[[:space:]]*=' "$cfg"; then
+    $sudo_cmd sed -i -E "s/^[#[:space:]]*require_ir[[:space:]]*=.*/require_ir = $new_val/" "$cfg"
+  elif grep -qE '^\[security\]' "$cfg"; then
+    $sudo_cmd sed -i -E "/^\[security\]/a require_ir = $new_val" "$cfg"
+  else
+    printf '\n[security]\nrequire_ir = %s\n' "$new_val" | $sudo_cmd tee -a "$cfg" >/dev/null
+  fi
+
+  if systemctl is-active --quiet facelock 2>/dev/null; then
+    $sudo_cmd systemctl restart facelock 2>/dev/null || true
+  fi
+}
+
+has_ir_camera() {
+  # 1. Non-interactive check with facelock devices if sudo is cached or passwordless
+  if command -v facelock >/dev/null 2>&1; then
+    if sudo -n facelock devices 2>/dev/null | grep -q '\[IR\]'; then
+      return 0
+    fi
+  fi
+
+  # 2. Unprivileged check via v4l2-ctl for IR typical pixel formats (GREY, Y16, etc.)
+  if command -v v4l2-ctl >/dev/null 2>&1; then
+    for dev in /dev/video*; do
+      [[ -e "$dev" ]] || continue
+      if v4l2-ctl --list-formats -d "$dev" 2>/dev/null | grep -q -E "'(GREY|Y16|Y12|Y10|Z16)'"; then
+        return 0
+      fi
+    done
+  fi
+
+  # 3. Check sysfs device names
+  for name_file in /sys/class/video4linux/video*/name; do
+    [[ -f "$name_file" ]] || continue
+    if grep -iq -E "infrared|\bir\b" "$name_file" 2>/dev/null; then
+      return 0
+    fi
+  done
+
+  # 4. Interactive fallback via sudo facelock devices if facelock exists
+  if command -v facelock >/dev/null 2>&1; then
+    if sudo facelock devices 2>/dev/null | grep -q '\[IR\]'; then
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
 do_setup() {
   if ! has_initial_pam_backup; then
     echo "=== Initial PAM Backup ==="
@@ -418,6 +481,18 @@ do_setup() {
     echo "✓ Initial PAM backup created at: $target"
     echo ""
   fi
+
+  echo "=== Checking Camera Capabilities ==="
+  if has_ir_camera; then
+    echo "✓ Infrared camera detected."
+  else
+    echo "Notice: No infrared camera detected on this computer."
+    echo "Applying require_ir = false in /etc/facelock/config.toml..."
+    do_set_require_ir "false"
+    echo "✓ Disabled require_ir requirement for regular RGB camera."
+  fi
+  echo ""
+
   echo "=== Launching Facelock Setup Wizard ==="
   echo ""
   sudo facelock setup
@@ -469,31 +544,6 @@ cmd_hyprlock_toggle() {
     facelock hyprlock disable >/dev/null 2>&1 || true
   else
     facelock hyprlock enable >/dev/null 2>&1 || true
-  fi
-}
-
-do_set_require_ir() {
-  local new_val="$1"
-  local cfg="/etc/facelock/config.toml"
-  local sudo_cmd=""
-  if [[ $EUID -ne 0 ]]; then
-    sudo_cmd="sudo"
-  fi
-
-  if [[ ! -f "$cfg" ]]; then
-    $sudo_cmd mkdir -p /etc/facelock
-    echo "require_ir = $new_val" | $sudo_cmd tee "$cfg" >/dev/null
-    return $?
-  fi
-
-  if grep -qE '^[#[:space:]]*require_ir[[:space:]]*=' "$cfg"; then
-    $sudo_cmd sed -i -E "s/^[#[:space:]]*require_ir[[:space:]]*=.*/require_ir = $new_val/" "$cfg"
-  else
-    printf '\nrequire_ir = %s\n' "$new_val" | $sudo_cmd tee -a "$cfg" >/dev/null
-  fi
-
-  if systemctl is-active --quiet facelock 2>/dev/null; then
-    $sudo_cmd systemctl restart facelock 2>/dev/null || true
   fi
 }
 
@@ -577,6 +627,9 @@ case "${1:-status}" in
     ;;
   has-initial-backup)
     has_initial_pam_backup
+    ;;
+  has-ir-camera)
+    has_ir_camera
     ;;
   setup)
     cmd_setup
