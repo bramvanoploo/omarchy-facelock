@@ -15,6 +15,7 @@ Panel {
   property bool confirmOpen: false
   property string confirmMessage: ""
   property string confirmButtonText: "Confirm"
+  property string confirmCancelText: "Cancel"
   property var confirmAction: null
   property var confirmCancelAction: null
   property bool toolsOverlayOpen: false
@@ -66,15 +67,16 @@ Panel {
     if (arg !== undefined && arg !== "") cmd.push(arg)
     actionProc.command = cmd
     actionProc.running = true
-    if (action !== "hyprlock-toggle" && action !== "require-ir-toggle") {
+    if (action !== "hyprlock-toggle" && action !== "require-ir-toggle" && action !== "set-require-ir") {
       toolsOverlayOpen = false
       root.close()
     }
   }
 
-  function askConfirmation(msg, btnText, action, cancelAction) {
+  function askConfirmation(msg, btnText, action, cancelAction, cancelBtnText) {
     confirmMessage = msg
     confirmButtonText = btnText
+    confirmCancelText = cancelBtnText !== undefined ? cancelBtnText : "Cancel"
     confirmAction = action
     confirmCancelAction = cancelAction !== undefined ? cancelAction : null
     confirmOpen = true
@@ -95,7 +97,7 @@ Panel {
     var cancelAct = confirmCancelAction
     confirmAction = null
     confirmCancelAction = null
-    if (cancelAct) {
+    if (cancelAct && root.opened) {
       cancelAct()
     }
   }
@@ -545,8 +547,40 @@ Panel {
                   bordered: true
                   selected: root.status.requireIr
                   onClicked: {
-                    root.status.requireIr = !root.status.requireIr
-                    root.runAction("require-ir-toggle")
+                    if (root.status.requireIr) {
+                      root.askConfirmation(
+                        "Using a non-IR (regular RGB) camera is less secure because it lacks infrared depth and liveness detection, making it more vulnerable to spoofing (such as photos or digital screens).\n\nAre you sure you want to use a non-IR camera for face unlock?",
+                        "Use non-IR camera",
+                        function() {
+                          root.status.requireIr = false
+                          root.runAction("set-require-ir", "false")
+                        },
+                        function() {
+                          root.status.requireIr = true
+                          root.runAction("set-require-ir", "true")
+                          root.askConfirmation(
+                            "Since you declined using a non-IR camera, require_ir remains enabled.\n\nIt will not be possible to use face unlock since there is no camera available to use.",
+                            "OK",
+                            function() {},
+                            function() {},
+                            "Dismiss"
+                          )
+                        },
+                        "Cancel"
+                      )
+                    } else {
+                      root.status.requireIr = true
+                      root.runAction("set-require-ir", "true")
+                      if (!root.status.hasIrCamera) {
+                        root.askConfirmation(
+                          "Require IR camera is now enabled.\n\nPlease note that no infrared (IR) camera was detected on this system, so face unlock will not be possible until a compatible IR camera is connected.",
+                          "OK",
+                          function() {},
+                          function() {},
+                          "Dismiss"
+                        )
+                      }
+                    }
                   }
                 }
 
@@ -611,7 +645,7 @@ Panel {
         z: 100
         message: root.confirmMessage
         confirmText: root.confirmButtonText
-        cancelText: "Cancel"
+        cancelText: root.confirmCancelText
         background: Color.popups.background
         foreground: root.foreground
         selectedText: root.accent

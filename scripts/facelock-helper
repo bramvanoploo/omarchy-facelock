@@ -69,6 +69,11 @@ cmd_status() {
     lock_face_pam_exists=true
   fi
 
+  local has_ir=false
+  if has_ir_camera; then
+    has_ir=true
+  fi
+
   local pkg
   if ! pkg=$(check_installed); then
     cat <<EOF
@@ -83,6 +88,7 @@ cmd_status() {
   "daemonRunning": false,
   "hyprlockIntegrated": false,
   "requireIr": true,
+  "hasIrCamera": $has_ir,
   "lockExplorerInstalled": $lock_explorer_installed,
   "lockFacePamExists": $lock_face_pam_exists
 }
@@ -148,6 +154,7 @@ EOF
   "daemonRunning": $daemon_running,
   "hyprlockIntegrated": $hyprlock_integrated,
   "requireIr": $require_ir,
+  "hasIrCamera": $has_ir,
   "lockExplorerInstalled": $lock_explorer_installed,
   "lockFacePamExists": $lock_face_pam_exists
 }
@@ -670,8 +677,8 @@ has_ir_camera() {
     fi
   done
 
-  # 4. Interactive fallback via sudo facelock devices if facelock exists
-  if command -v facelock >/dev/null 2>&1; then
+  # 4. Interactive fallback via sudo facelock devices if facelock exists and in terminal
+  if [[ -t 0 ]] && command -v facelock >/dev/null 2>&1; then
     if sudo facelock devices 2>/dev/null | grep -q '\[IR\]'; then
       return 0
     fi
@@ -686,9 +693,42 @@ do_setup() {
     echo "✓ Infrared camera detected."
   else
     echo "Notice: No infrared camera detected on this computer."
-    echo "Applying require_ir = false in /etc/facelock/config.toml..."
-    do_set_require_ir "false"
-    echo "✓ Disabled require_ir requirement for regular RGB camera."
+    echo ""
+    echo "Using a regular (non-IR) camera is less secure because it lacks"
+    echo "infrared depth and liveness detection, making it more vulnerable"
+    echo "to presentation attacks (such as photos or digital screens)."
+    echo ""
+
+    local allow_non_ir=false
+    if command -v gum >/dev/null 2>&1; then
+      if gum confirm "Are you sure you want to use a non-IR camera for face unlock?" \
+          --affirmative="Use non-IR camera" \
+          --negative="Cancel"; then
+        allow_non_ir=true
+      fi
+    else
+      read -r -p "Are you sure you want to use a non-IR camera for face unlock? [y/N]: " reply
+      if [[ "$reply" =~ ^[Yy]$ ]]; then
+        allow_non_ir=true
+      fi
+    fi
+
+    if [[ "$allow_non_ir" == "true" ]]; then
+      echo ""
+      echo "Applying require_ir = false in /etc/facelock/config.toml..."
+      do_set_require_ir "false"
+      echo "✓ Disabled require_ir requirement for regular RGB camera."
+    else
+      echo ""
+      echo "Applying require_ir = true in /etc/facelock/config.toml..."
+      do_set_require_ir "true"
+      echo ""
+      echo "Notice: require_ir remains enabled."
+      echo "It will not be possible to use face unlock since there is no camera available to use."
+      echo ""
+      sleep 3
+      return 1
+    fi
   fi
   echo ""
 
@@ -746,13 +786,8 @@ cmd_hyprlock_toggle() {
   fi
 }
 
-cmd_require_ir_toggle() {
-  local current
-  current=$(get_require_ir)
-  local new_val="true"
-  if [[ "$current" == "true" ]]; then
-    new_val="false"
-  fi
+cmd_set_require_ir() {
+  local new_val="${1:-true}"
 
   # Attempt passwordless sudo first
   if sudo -n true 2>/dev/null; then
@@ -770,6 +805,16 @@ cmd_require_ir_toggle() {
   # Terminal presentation fallback
   local helper_path="$0"
   launch_terminal "echo 'Updating require_ir in /etc/facelock/config.toml...'; sudo bash -c \"\$(declare -f do_set_require_ir); do_set_require_ir $new_val\" && echo '✓ require_ir set to $new_val' && sleep 1"
+}
+
+cmd_require_ir_toggle() {
+  local current
+  current=$(get_require_ir)
+  local new_val="true"
+  if [[ "$current" == "true" ]]; then
+    new_val="false"
+  fi
+  cmd_set_require_ir "$new_val"
 }
 
 cmd_daemon_restart() {
@@ -877,6 +922,10 @@ case "${1:-status}" in
     cmd_require_ir_toggle
     ;;
   set-require-ir)
+    shift
+    cmd_set_require_ir "$@"
+    ;;
+  do-set-require-ir)
     shift
     do_set_require_ir "$@"
     ;;

@@ -12,6 +12,7 @@ function emptyStatus() {
     daemonRunning: false,
     hyprlockIntegrated: false,
     requireIr: true,
+    hasIrCamera: false,
     lockExplorerInstalled: false,
     lockFacePamExists: false
   }
@@ -35,6 +36,7 @@ function parseStatus(raw) {
     base.daemonRunning = Boolean(parsed.daemonRunning)
     base.hyprlockIntegrated = Boolean(parsed.hyprlockIntegrated)
     base.requireIr = parsed.requireIr !== undefined ? Boolean(parsed.requireIr) : true
+    base.hasIrCamera = parsed.hasIrCamera !== undefined ? Boolean(parsed.hasIrCamera) : false
     base.lockExplorerInstalled = Boolean(parsed.lockExplorerInstalled)
     base.lockFacePamExists = Boolean(parsed.lockFacePamExists)
     return base
