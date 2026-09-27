@@ -24,7 +24,6 @@ An [Omarchy](https://omarchy.org) status bar plugin to install, configure, and m
   - One-click toggle for `require_ir` in `/etc/facelock/config.toml`.
 - **System & Security Tools**:
   - Quick access to edit `/etc/facelock/config.toml` in your configured system editor.
-  - Configure passwordless sudo for facelock (`/etc/sudoers.d/facelock`).
   - Restart daemon (`facelock daemon restart`).
   - View detailed system status, TPM status, and run performance benchmarks.
   - Complete uninstall flow with PAM and face model cleanup.

@@ -776,10 +776,6 @@ cmd_daemon_restart() {
   launch_terminal "sudo facelock daemon restart"
 }
 
-cmd_setup_sudoers() {
-  launch_terminal "echo 'Configuring passwordless sudo for facelock...'; echo '$USER ALL=(ALL) NOPASSWD: /usr/bin/facelock' | sudo tee /etc/sudoers.d/facelock && sudo chmod 0440 /etc/sudoers.d/facelock && echo 'Done! Sudo confirmation is now automatic for facelock.'"
-}
-
 cmd_run() {
   local subcommand="$1"
   shift
@@ -798,9 +794,6 @@ cmd_run() {
       ;;
     config)
       launch_terminal "sudo facelock config"
-      ;;
-    sudoers)
-      cmd_setup_sudoers
       ;;
     *)
       launch_terminal "sudo facelock $*"
@@ -855,9 +848,6 @@ case "${1:-status}" in
     ;;
   daemon-restart)
     cmd_daemon_restart
-    ;;
-  setup-sudoers)
-    cmd_setup_sudoers
     ;;
   uninstall)
     cmd_uninstall
