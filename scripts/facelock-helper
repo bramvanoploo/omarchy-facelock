@@ -213,6 +213,9 @@ EOF
     echo ""
     sleep 1
     do_setup
+    echo ""
+    echo "Restarting Omarchy shell..."
+    omarchy restart shell 2>/dev/null || true
   else
     echo ""
     echo "Installation failed. Please check the output above."

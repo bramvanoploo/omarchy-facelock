@@ -25,7 +25,7 @@ sleep 0.5
 echo "Enabling $PLUGIN_ID widget on the right bar..."
 omarchy plugin enable "$PLUGIN_ID" --section right >/dev/null 2>&1 || true
 
-echo "Restarting Omarchy shell..."
-omarchy restart shell || true
+echo "✓ Facelock plugin files installed successfully!"
 
-echo "✓ Facelock plugin installed and reloaded successfully!"
+echo "Restarting Omarchy shell..."
+omarchy restart shell
