@@ -39,7 +39,36 @@ get_require_ir() {
   echo "true"
 }
 
+is_lock_explorer_installed() {
+  if [[ -d "$HOME/.config/omarchy/plugins/io.github.sirjul1337.lock-explorer" ]]; then
+    return 0
+  fi
+  if [[ -d "/usr/share/omarchy/plugins/io.github.sirjul1337.lock-explorer" ]]; then
+    return 0
+  fi
+  if command -v omarchy >/dev/null 2>&1; then
+    if omarchy plugin list 2>/dev/null | grep -q "^io\.github\.sirjul1337\.lock-explorer[[:space:]]"; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
+is_lock_face_pam_installed() {
+  [[ -f "/etc/pam.d/omarchy-lock-face" ]]
+}
+
 cmd_status() {
+  local lock_explorer_installed=false
+  if is_lock_explorer_installed; then
+    lock_explorer_installed=true
+  fi
+
+  local lock_face_pam_exists=false
+  if is_lock_face_pam_installed; then
+    lock_face_pam_exists=true
+  fi
+
   local pkg
   if ! pkg=$(check_installed); then
     cat <<EOF
@@ -53,7 +82,9 @@ cmd_status() {
   "lastUpdated": null,
   "daemonRunning": false,
   "hyprlockIntegrated": false,
-  "requireIr": true
+  "requireIr": true,
+  "lockExplorerInstalled": $lock_explorer_installed,
+  "lockFacePamExists": $lock_face_pam_exists
 }
 EOF
     return 0
@@ -116,7 +147,9 @@ EOF
   "lastUpdated": $last_updated,
   "daemonRunning": $daemon_running,
   "hyprlockIntegrated": $hyprlock_integrated,
-  "requireIr": $require_ir
+  "requireIr": $require_ir,
+  "lockExplorerInstalled": $lock_explorer_installed,
+  "lockFacePamExists": $lock_face_pam_exists
 }
 EOF
 }
@@ -190,6 +223,64 @@ EOF
 cmd_install() {
   local helper_path="$0"
   launch_terminal "bash '$helper_path' do-install"
+}
+
+do_install_lock_face_pam() {
+  local target="/etc/pam.d/omarchy-lock-face"
+  echo "=== Install Lock Screen PAM (omarchy-lock-face) ==="
+  echo ""
+  echo "Setting up /etc/pam.d/omarchy-lock-face for Lock Screen Explorer..."
+
+  local tmp
+  tmp=$(mktemp)
+  trap 'rm -f "$tmp"' EXIT
+  cat << 'EOF' > "$tmp"
+#%PAM-1.0
+
+-auth      sufficient                  pam_facelock.so
+auth       required                    pam_deny.so
+account    include                     system-local-login
+EOF
+
+  local ref_file="/etc/pam.d/sudo"
+  [[ ! -f "$ref_file" ]] && ref_file="/etc/pam.d/other"
+  [[ ! -f "$ref_file" ]] && ref_file="/etc/pam.d/system-auth"
+
+  local perms="644"
+  local owner="root"
+  local group="root"
+
+  if [[ -f "$ref_file" ]]; then
+    perms=$(stat -c "%a" "$ref_file" 2>/dev/null || echo "644")
+    owner=$(stat -c "%U" "$ref_file" 2>/dev/null || echo "root")
+    group=$(stat -c "%G" "$ref_file" 2>/dev/null || echo "root")
+  fi
+
+  chmod "$perms" "$tmp"
+  if sudo cp "$tmp" "$target"; then
+    sudo chown "$owner:$group" "$target" 2>/dev/null || true
+    sudo chmod "$perms" "$target" 2>/dev/null || true
+    rm -f "$tmp"
+    echo ""
+    echo "✓ Successfully installed $target"
+    echo "  Owner: $owner:$group"
+    echo "  Permissions: $perms"
+    echo ""
+    echo "Face unlock is now supported with the Lock Screen Explorer plugin."
+    sleep 2
+    return 0
+  else
+    rm -f "$tmp"
+    echo ""
+    echo "Error: Failed to install $target"
+    sleep 2
+    return 1
+  fi
+}
+
+cmd_install_lock_face_pam() {
+  local helper_path="$0"
+  launch_terminal "bash '$helper_path' do-install-lock-face-pam"
 }
 
 do_uninstall() {
@@ -566,6 +657,12 @@ case "${1:-status}" in
     ;;
   do-uninstall)
     do_uninstall
+    ;;
+  install-lock-face-pam)
+    cmd_install_lock_face_pam
+    ;;
+  do-install-lock-face-pam)
+    do_install_lock_face_pam
     ;;
   edit-config)
     cmd_edit_config

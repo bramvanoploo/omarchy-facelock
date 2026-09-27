@@ -11,7 +11,9 @@ function emptyStatus() {
     lastUpdated: null,
     daemonRunning: false,
     hyprlockIntegrated: false,
-    requireIr: true
+    requireIr: true,
+    lockExplorerInstalled: false,
+    lockFacePamExists: false
   }
 }
 
@@ -33,6 +35,8 @@ function parseStatus(raw) {
     base.daemonRunning = Boolean(parsed.daemonRunning)
     base.hyprlockIntegrated = Boolean(parsed.hyprlockIntegrated)
     base.requireIr = parsed.requireIr !== undefined ? Boolean(parsed.requireIr) : true
+    base.lockExplorerInstalled = Boolean(parsed.lockExplorerInstalled)
+    base.lockFacePamExists = Boolean(parsed.lockFacePamExists)
     return base
   } catch (e) {
     return base

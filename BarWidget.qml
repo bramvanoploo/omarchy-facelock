@@ -17,6 +17,7 @@ Panel {
   property string confirmButtonText: "Confirm"
   property var confirmAction: null
   property bool toolsOverlayOpen: false
+  property bool lockPamPromptShownThisOpen: false
 
   readonly property string pluginDir: Qt.resolvedUrl(".").toString().replace(/^file:\/\//, "").replace(/\/$/, "")
   readonly property string helper: pluginDir + "/scripts/facelock-helper"
@@ -26,8 +27,25 @@ Panel {
   readonly property color dim: Qt.darker(foreground, 1.45)
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
+  function checkLockExplorerPam() {
+    if (lockPamPromptShownThisOpen) return
+    if (root.status.lockExplorerInstalled && !root.status.lockFacePamExists && !root.confirmOpen && !root.toolsOverlayOpen) {
+      lockPamPromptShownThisOpen = true
+      root.askConfirmation(
+        "The \"Lock Screen Explorer\" plugin is installed, but /etc/pam.d/omarchy-lock-face does not exist.\n\nThis PAM file is needed to support face unlock from the lockscreen with the \"Lock Screen Explorer\" plugin.\n\nWould you like to create it now?",
+        "Create",
+        function() {
+          root.runAction("install-lock-face-pam")
+        }
+      )
+    }
+  }
+
   function applyStatus(raw) {
     status = Model.parseStatus(raw)
+    if (opened) {
+      checkLockExplorerPam()
+    }
   }
 
   function refresh() {
@@ -73,7 +91,9 @@ Panel {
 
   onOpenedChanged: {
     if (opened) {
+      lockPamPromptShownThisOpen = false
       refresh()
+      checkLockExplorerPam()
     } else {
       toolsOverlayOpen = false
       handleCanceled()
@@ -513,6 +533,29 @@ Panel {
                   onClicked: {
                     root.status.requireIr = !root.status.requireIr
                     root.runAction("require-ir-toggle")
+                  }
+                }
+
+                Button {
+                  width: parent.width
+                  text: root.status.lockFacePamExists ? "Reinstall omarchy-lock-face PAM" : "Install omarchy-lock-face PAM"
+                  iconText: "󰌾"
+                  tooltipText: "Install /etc/pam.d/omarchy-lock-face for Lock Screen Explorer"
+                  bordered: true
+                  onClicked: {
+                    if (root.status.lockFacePamExists) {
+                      root.askConfirmation(
+                        "The PAM file /etc/pam.d/omarchy-lock-face is already present.\n\nDo you want to overwrite it with the recommended configuration?",
+                        "Overwrite",
+                        function() { root.runAction("install-lock-face-pam") }
+                      )
+                    } else {
+                      root.askConfirmation(
+                        "Install /etc/pam.d/omarchy-lock-face to enable face unlock with the \"Lock Screen Explorer\" plugin?",
+                        "Install",
+                        function() { root.runAction("install-lock-face-pam") }
+                      )
+                    }
                   }
                 }
 
