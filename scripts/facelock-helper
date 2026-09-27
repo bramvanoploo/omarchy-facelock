@@ -230,10 +230,20 @@ cmd_install() {
 
 do_install_lock_face_pam() {
   local target="/etc/pam.d/omarchy-lock-face"
-  echo "=== Install Lock Screen PAM (omarchy-lock-face) ==="
+  echo "=== Install Lock Screen Support ==="
   echo ""
-  echo "Setting up /etc/pam.d/omarchy-lock-face for Lock Screen Explorer..."
 
+  # 1. Add facelock support for system-auth
+  echo "Adding Facelock support for system-auth..."
+  if sudo facelock pam add --service system-auth --allow-sensitive --yes; then
+    echo "✓ Facelock added to system-auth."
+  else
+    echo "Warning: Could not configure system-auth with facelock."
+  fi
+  echo ""
+
+  # 2. Create /etc/pam.d/omarchy-lock-face
+  echo "Setting up /etc/pam.d/omarchy-lock-face for Lock Screen Explorer..."
   local tmp
   tmp=$(mktemp)
   trap 'rm -f "$tmp"' EXIT
@@ -290,6 +300,16 @@ do_remove_lock_face_pam() {
   local target="/etc/pam.d/omarchy-lock-face"
   echo "=== Remove Lock Screen Support ==="
   echo ""
+
+  # 1. Remove facelock from system-auth
+  if command -v facelock >/dev/null 2>&1; then
+    echo "Removing Facelock from system-auth PAM service..."
+    sudo facelock pam remove --service system-auth || true
+    echo "✓ Removed Facelock from system-auth."
+    echo ""
+  fi
+
+  # 2. Remove /etc/pam.d/omarchy-lock-face
   if [[ -f "$target" ]]; then
     echo "Removing $target..."
     if sudo rm -f "$target"; then
