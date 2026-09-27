@@ -18,7 +18,7 @@ An [Omarchy](https://omarchy.org) status bar plugin to install, configure, and m
 - **Hyprlock & Lock Screen Support**:
   - Toggle Hyprlock lock screen face unlock integration via `facelock hyprlock enable` / `disable`.
   - Add or remove face unlock support for the Lock Screen Explorer plugin and system PAM stack (`system-auth`, `system-login`, `system-local-login`, and `/etc/pam.d/omarchy-lock-face`).
-  - Automatic backup and restoration of `/etc/pam.d/system-auth` with dynamic PAM `success=` skip chain positioning.
+  - Dynamic PAM `success=` skip chain positioning and reversal in `/etc/pam.d/system-auth`.
 - **Hardware & IR Detection**:
   - Automatic hardware detection for infrared (IR) cameras.
   - One-click toggle for `require_ir` in `/etc/facelock/config.toml`.
