@@ -538,7 +538,7 @@ Panel {
 
                 Button {
                   width: parent.width
-                  text: root.status.lockFacePamExists ? "Reinstall Lock Screen Explorer support" : "Install Lock Screen Explorer support"
+                  text: root.status.lockFacePamExists ? "Reinstall lock screen support" : "Install lock screen support"
                   iconText: "󰌾"
                   tooltipText: "Install /etc/pam.d/omarchy-lock-face for Lock Screen Explorer"
                   bordered: true
