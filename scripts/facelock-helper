@@ -228,6 +228,97 @@ cmd_install() {
   launch_terminal "bash '$helper_path' do-install"
 }
 
+pam_add_facelock_to_system_auth() {
+  local src="$1"
+  local dst="$2"
+  python3 -c '
+import sys, re
+
+with open(sys.argv[1], "r") as f:
+    lines = f.readlines()
+
+# 1. Find line with the highest success= value
+max_val = -1
+max_idx = -1
+for i, line in enumerate(lines):
+    m = re.search(r"success=(\d+)", line)
+    if m:
+        val = int(m.group(1))
+        if val > max_val:
+            max_val = val
+            max_idx = i
+
+if max_idx == -1:
+    sys.stderr.write("Error: No success= entry found in PAM file.\n")
+    sys.exit(1)
+
+# 2. Place pam_facelock.so directly below the line with highest success=
+new_line = "auth       [success=1 default=ignore]  pam_facelock.so\n"
+lines.insert(max_idx + 1, new_line)
+
+# 3. Look for all success= entries, grouped by section/chain, and make them incremental
+# (top to bottom, high to low down to 1)
+groups = []
+current_group = []
+for i, line in enumerate(lines):
+    stripped = line.strip()
+    has_success = bool(re.search(r"success=\d+", line))
+    is_module = bool(re.match(r"^-?(auth|account|password|session)\b", stripped))
+    if has_success:
+        current_group.append(i)
+    elif is_module:
+        if current_group:
+            groups.append(current_group)
+            current_group = []
+if current_group:
+    groups.append(current_group)
+
+for g in groups:
+    count = len(g)
+    for step, idx in enumerate(g):
+        new_val = count - step
+        lines[idx] = re.sub(r"success=\d+", f"success={new_val}", lines[idx])
+
+with open(sys.argv[2], "w") as f:
+    f.writelines(lines)
+' "$src" "$dst"
+}
+
+pam_revert_facelock_from_system_auth() {
+  local src="$1"
+  local dst="$2"
+  python3 -c '
+import sys, re
+
+with open(sys.argv[1], "r") as f:
+    lines = [line for line in f.readlines() if "pam_facelock.so" not in line]
+
+groups = []
+current_group = []
+for i, line in enumerate(lines):
+    stripped = line.strip()
+    has_success = bool(re.search(r"success=\d+", line))
+    is_module = bool(re.match(r"^-?(auth|account|password|session)\b", stripped))
+    if has_success:
+        current_group.append(i)
+    elif is_module:
+        if current_group:
+            groups.append(current_group)
+            current_group = []
+if current_group:
+    groups.append(current_group)
+
+for g in groups:
+    count = len(g)
+    for step, idx in enumerate(g):
+        new_val = count - step
+        lines[idx] = re.sub(r"success=\d+", f"success={new_val}", lines[idx])
+
+with open(sys.argv[2], "w") as f:
+    f.writelines(lines)
+' "$src" "$dst"
+}
+
 do_install_lock_face_pam() {
   local target="/etc/pam.d/omarchy-lock-face"
   local sys_auth="/etc/pam.d/system-auth"
@@ -248,21 +339,7 @@ do_install_lock_face_pam() {
 
     local tmp_auth
     tmp_auth=$(mktemp)
-    if awk '
-      /pam_systemd_home\.so/ && /success=[0-9]+/ {
-        match($0, /success=([0-9]+)/, arr)
-        n = arr[1] + 0
-        new_n = n + 1
-        line = $0
-        sub(/success=[0-9]+/, "success=" new_n, line)
-        print line
-        print "auth       [success=" n " default=ignore]  pam_facelock.so"
-        found = 1
-        next
-      }
-      { print }
-      END { if (!found) exit 2 }
-    ' "$sys_auth" > "$tmp_auth"; then
+    if pam_add_facelock_to_system_auth "$sys_auth" "$tmp_auth"; then
       sudo cp "$tmp_auth" "$sys_auth"
       sudo chmod 0644 "$sys_auth"
       sudo chown root:root "$sys_auth"
@@ -270,7 +347,7 @@ do_install_lock_face_pam() {
       echo "✓ Configured $sys_auth."
     else
       rm -f "$tmp_auth"
-      echo "Warning: Could not configure $sys_auth (pam_systemd_home.so line not matched)."
+      echo "Warning: Could not configure $sys_auth."
     fi
   fi
 
@@ -367,21 +444,7 @@ do_remove_lock_face_pam() {
     echo "Reverting Facelock in $sys_auth..."
     local tmp_auth
     tmp_auth=$(mktemp)
-    if awk '
-      /pam_systemd_home\.so/ && /success=[0-9]+/ {
-        match($0, /success=([0-9]+)/, arr)
-        n = arr[1] + 0
-        new_n = (n > 1) ? (n - 1) : 1
-        line = $0
-        sub(/success=[0-9]+/, "success=" new_n, line)
-        print line
-        next
-      }
-      /pam_facelock\.so/ {
-        next
-      }
-      { print }
-    ' "$sys_auth" > "$tmp_auth"; then
+    if pam_revert_facelock_from_system_auth "$sys_auth" "$tmp_auth"; then
       sudo cp "$tmp_auth" "$sys_auth"
       sudo chmod 0644 "$sys_auth"
       sudo chown root:root "$sys_auth"
@@ -466,21 +529,7 @@ do_uninstall() {
     echo "Reverting Facelock in $sys_auth..."
     local tmp_auth
     tmp_auth=$(mktemp)
-    if awk '
-      /pam_systemd_home\.so/ && /success=[0-9]+/ {
-        match($0, /success=([0-9]+)/, arr)
-        n = arr[1] + 0
-        new_n = (n > 1) ? (n - 1) : 1
-        line = $0
-        sub(/success=[0-9]+/, "success=" new_n, line)
-        print line
-        next
-      }
-      /pam_facelock\.so/ {
-        next
-      }
-      { print }
-    ' "$sys_auth" > "$tmp_auth"; then
+    if pam_revert_facelock_from_system_auth "$sys_auth" "$tmp_auth"; then
       sudo cp "$tmp_auth" "$sys_auth"
       sudo chmod 0644 "$sys_auth"
       sudo chown root:root "$sys_auth"
