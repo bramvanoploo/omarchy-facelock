@@ -184,30 +184,9 @@ launch_terminal() {
 do_install() {
   echo "=== Facelock Installation ==="
   echo ""
-  echo "Installing facelock-bin via yay (without debug package)..."
+  echo "Installing facelock-bin via yay..."
 
-  local makepkg_conf
-  makepkg_conf=$(mktemp)
-  cat << 'EOF' > "$makepkg_conf"
-[[ -r /etc/makepkg.conf ]] && source /etc/makepkg.conf
-[[ -r "${XDG_CONFIG_HOME:-$HOME/.config}/pacman/makepkg.conf" ]] && source "${XDG_CONFIG_HOME:-$HOME/.config}/pacman/makepkg.conf"
-OPTIONS=(strip docs !libtool !staticlibs emptydirs zipman purge !debug lto)
-EOF
-
-  local install_ok=false
-  if yay -S --noconfirm --makepkgconf "$makepkg_conf" facelock-bin; then
-    install_ok=true
-  elif yay -S --noconfirm facelock-bin; then
-    install_ok=true
-  fi
-  rm -f "$makepkg_conf"
-
-  # Ensure facelock-bin-debug is removed if it was ever installed
-  if pacman -Q facelock-bin-debug >/dev/null 2>&1; then
-    sudo pacman -Rns --noconfirm facelock-bin-debug 2>/dev/null || true
-  fi
-
-  if [[ "$install_ok" == "true" ]]; then
+  if yay -S --noconfirm facelock-bin; then
     echo ""
     echo "✓ Installation complete."
     echo ""
@@ -558,9 +537,6 @@ do_uninstall() {
   # 5. Uninstall facelock package
   echo ""
   echo "Uninstalling facelock-bin..."
-  if pacman -Q facelock-bin-debug >/dev/null 2>&1; then
-    sudo pacman -Rns --noconfirm facelock-bin-debug 2>/dev/null || true
-  fi
   if pacman -Q facelock-bin >/dev/null 2>&1; then
     sudo pacman -Rns --noconfirm facelock-bin
   elif pacman -Q facelock >/dev/null 2>&1; then
