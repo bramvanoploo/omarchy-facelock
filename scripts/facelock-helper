@@ -2,17 +2,8 @@
 set -eo pipefail
 
 check_installed() {
-  if compgen -G "/var/lib/pacman/local/facelock-bin-*" >/dev/null 2>&1; then
-    echo "facelock-bin"
-    return 0
-  fi
-  if compgen -G "/var/lib/pacman/local/facelock-[0-9]*" >/dev/null 2>&1; then
-    echo "facelock"
-    return 0
-  fi
-  if command -v facelock >/dev/null 2>&1; then
-    echo "facelock"
-    return 0
+  if ! command -v facelock >/dev/null 2>&1 && [[ ! -x /usr/bin/facelock ]]; then
+    return 1
   fi
   if pacman -Q facelock-bin >/dev/null 2>&1; then
     echo "facelock-bin"
@@ -22,7 +13,12 @@ check_installed() {
     echo "facelock"
     return 0
   fi
-  return 1
+  if pacman -Q facelock-git >/dev/null 2>&1; then
+    echo "facelock-git"
+    return 0
+  fi
+  echo "facelock"
+  return 0
 }
 
 get_require_ir() {
@@ -65,7 +61,7 @@ EOF
 
   local version="unknown"
   if command -v facelock >/dev/null 2>&1; then
-    read -r _ version < <(facelock --version 2>/dev/null || echo "facelock unknown")
+    version=$(facelock --version 2>/dev/null | awk '{print $2}' || echo "unknown")
     : "${version:=unknown}"
   fi
 
@@ -82,8 +78,12 @@ EOF
   local enroll_json
   enroll_json=$(timeout 1.5s facelock is-enrolled --json 2>/dev/null || true)
   if [[ -n "$enroll_json" ]]; then
-    local raw_updated=""
-    read -r enrolled model_count raw_updated < <(jq -r '[.enrolled // false, .models // 0, .updated // "null"] | @tsv' <<<"$enroll_json" 2>/dev/null || echo "false 0 null")
+    local raw_enrolled raw_models raw_updated
+    raw_enrolled=$(jq -r '.enrolled // false' <<<"$enroll_json" 2>/dev/null || echo "false")
+    raw_models=$(jq -r '.models // 0' <<<"$enroll_json" 2>/dev/null || echo "0")
+    raw_updated=$(jq -r '.updated // empty' <<<"$enroll_json" 2>/dev/null || true)
+    [[ "$raw_enrolled" == "true" ]] && enrolled=true
+    [[ "$raw_models" =~ ^[0-9]+$ ]] && model_count="$raw_models"
     if [[ -n "$raw_updated" && "$raw_updated" != "null" ]]; then
       last_updated="\"$raw_updated\""
     fi
@@ -151,8 +151,30 @@ launch_terminal() {
 do_install() {
   echo "=== Facelock Installation ==="
   echo ""
-  echo "Installing facelock-bin via yay..."
-  if yay -S --noconfirm facelock-bin; then
+  echo "Installing facelock-bin via yay (without debug package)..."
+
+  local makepkg_conf
+  makepkg_conf=$(mktemp)
+  cat << 'EOF' > "$makepkg_conf"
+[[ -r /etc/makepkg.conf ]] && source /etc/makepkg.conf
+[[ -r "${XDG_CONFIG_HOME:-$HOME/.config}/pacman/makepkg.conf" ]] && source "${XDG_CONFIG_HOME:-$HOME/.config}/pacman/makepkg.conf"
+OPTIONS=(strip docs !libtool !staticlibs emptydirs zipman purge !debug lto)
+EOF
+
+  local install_ok=false
+  if yay -S --noconfirm --makepkgconf "$makepkg_conf" facelock-bin; then
+    install_ok=true
+  elif yay -S --noconfirm facelock-bin; then
+    install_ok=true
+  fi
+  rm -f "$makepkg_conf"
+
+  # Ensure facelock-bin-debug is removed if it was ever installed
+  if pacman -Q facelock-bin-debug >/dev/null 2>&1; then
+    sudo pacman -Rns --noconfirm facelock-bin-debug 2>/dev/null || true
+  fi
+
+  if [[ "$install_ok" == "true" ]]; then
     echo ""
     echo "✓ Installation complete."
     echo ""
@@ -202,7 +224,7 @@ do_uninstall() {
     echo "Removing Facelock PAM configuration..."
     local filename
     for file in /etc/pam.d/*; do
-      if [[ -f "$file" ]] && (grep -qs "pam_facelock\.so" "$file" || sudo grep -qs "pam_facelock\.so" "$file"); then
+      if [[ -f "$file" ]] && grep -qs "pam_facelock\.so" "$file"; then
         filename=$(basename "$file")
         echo "Removing PAM service: $filename..."
         sudo facelock pam remove --service "$filename" || true
@@ -214,10 +236,15 @@ do_uninstall() {
   # 5. Uninstall facelock package
   echo ""
   echo "Uninstalling facelock-bin..."
+  if pacman -Q facelock-bin-debug >/dev/null 2>&1; then
+    sudo pacman -Rns --noconfirm facelock-bin-debug 2>/dev/null || true
+  fi
   if pacman -Q facelock-bin >/dev/null 2>&1; then
     sudo pacman -Rns --noconfirm facelock-bin
   elif pacman -Q facelock >/dev/null 2>&1; then
     sudo pacman -Rns --noconfirm facelock
+  elif pacman -Q facelock-git >/dev/null 2>&1; then
+    sudo pacman -Rns --noconfirm facelock-git
   fi
 
   # 6. Remove any remaining enrolled face data and database files

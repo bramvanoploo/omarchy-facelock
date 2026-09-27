@@ -357,9 +357,9 @@ Panel {
               bordered: true
               onClicked: root.runAction("devices")
             }
-            }
           }
         }
+      }
 
         // Tools & Integration Modal Overlay
         Item {
