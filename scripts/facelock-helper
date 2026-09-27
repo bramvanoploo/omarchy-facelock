@@ -274,15 +274,19 @@ do_install_lock_face_pam() {
     fi
   fi
 
-  echo "Adding Facelock support for system-login..."
-  if sudo facelock pam add --service system-login --allow-sensitive --yes; then
+  echo "Configuring Facelock support for system-login..."
+  if grep -qs "pam_facelock\.so" /etc/pam.d/system-login; then
+    echo "✓ Facelock line already present in /etc/pam.d/system-login."
+  elif sudo facelock pam add --service system-login --allow-sensitive --yes; then
     echo "✓ Facelock added to system-login."
   else
     echo "Warning: Could not configure system-login with facelock."
   fi
 
-  echo "Adding Facelock support for system-local-login..."
-  if sudo facelock pam add --service system-local-login --yes; then
+  echo "Configuring Facelock support for system-local-login..."
+  if grep -qs "pam_facelock\.so" /etc/pam.d/system-local-login; then
+    echo "✓ Facelock line already present in /etc/pam.d/system-local-login."
+  elif sudo facelock pam add --service system-local-login --yes; then
     echo "✓ Facelock added to system-local-login."
   else
     echo "Warning: Could not configure system-local-login with facelock."
