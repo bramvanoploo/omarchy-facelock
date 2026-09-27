@@ -550,21 +550,22 @@ Panel {
                     if (root.status.requireIr) {
                       root.askConfirmation(
                         "Using a non-IR (regular RGB) camera is less secure because it lacks infrared depth and liveness detection, making it more vulnerable to spoofing (such as photos or digital screens).\n\nAre you sure you want to use a non-IR camera for face unlock?",
-                        "Use non-IR camera",
+                        "Understood",
                         function() {
                           root.status.requireIr = false
                           root.runAction("set-require-ir", "false")
                         },
                         function() {
                           root.status.requireIr = true
-                          root.runAction("set-require-ir", "true")
-                          root.askConfirmation(
-                            "Since you declined using a non-IR camera, require_ir remains enabled.\n\nIt will not be possible to use face unlock since there is no camera available to use.",
-                            "OK",
-                            function() {},
-                            function() {},
-                            "Dismiss"
-                          )
+                          if (!root.status.hasIrCamera) {
+                            root.askConfirmation(
+                              "Since you declined using a non-IR camera, require_ir remains enabled.\n\nIt will not be possible to use face unlock since there is no camera available to use.",
+                              "OK",
+                              function() {},
+                              function() {},
+                              "Dismiss"
+                            )
+                          }
                         },
                         "Cancel"
                       )

@@ -559,11 +559,6 @@ do_uninstall() {
   rm -rf "${HOME}/.local/state/omarchy/facelock/pam-backups" 2>/dev/null || true
   echo "✓ Enrolled faces data removed."
 
-  # 7. Clean up sudoers rule if present
-  if [[ -f /etc/sudoers.d/facelock ]]; then
-    sudo rm -f /etc/sudoers.d/facelock
-  fi
-
   echo ""
   echo "✓ Facelock uninstalled successfully."
   sleep 2
@@ -632,18 +627,32 @@ do_set_require_ir() {
     sudo_cmd="sudo"
   fi
 
+  # Don't change require_ir to true if already true or commented out (enabled by default)
+  if [[ "$new_val" == "true" ]]; then
+    if [[ ! -f "$cfg" ]] || ! grep -qE '^[[:space:]]*require_ir[[:space:]]*=[[:space:]]*false' "$cfg"; then
+      return 0
+    fi
+  fi
+
   if [[ ! -f "$cfg" ]]; then
     $sudo_cmd mkdir -p /etc/facelock
     printf '[security]\nrequire_ir = %s\n' "$new_val" | $sudo_cmd tee "$cfg" >/dev/null
     return $?
   fi
 
-  if grep -qE '^[#[:space:]]*require_ir[[:space:]]*=' "$cfg"; then
-    $sudo_cmd sed -i -E "s/^[#[:space:]]*require_ir[[:space:]]*=.*/require_ir = $new_val/" "$cfg"
-  elif grep -qE '^\[security\]' "$cfg"; then
-    $sudo_cmd sed -i -E "/^\[security\]/a require_ir = $new_val" "$cfg"
+  if [[ "$new_val" == "true" ]]; then
+    # Comment out or reset require_ir back to default
+    if grep -qE '^[[:space:]]*require_ir[[:space:]]*=' "$cfg"; then
+      $sudo_cmd sed -i -E "s/^[[:space:]]*require_ir[[:space:]]*=.*/# require_ir = true/" "$cfg"
+    fi
   else
-    printf '\n[security]\nrequire_ir = %s\n' "$new_val" | $sudo_cmd tee -a "$cfg" >/dev/null
+    if grep -qE '^[#[:space:]]*require_ir[[:space:]]*=' "$cfg"; then
+      $sudo_cmd sed -i -E "s/^[#[:space:]]*require_ir[[:space:]]*=.*/require_ir = false/" "$cfg"
+    elif grep -qE '^\[security\]' "$cfg"; then
+      $sudo_cmd sed -i -E "/^\[security\]/a require_ir = false" "$cfg"
+    else
+      printf '\n[security]\nrequire_ir = false\n' | $sudo_cmd tee -a "$cfg" >/dev/null
+    fi
   fi
 
   if systemctl is-active --quiet facelock 2>/dev/null; then
@@ -652,14 +661,7 @@ do_set_require_ir() {
 }
 
 has_ir_camera() {
-  # 1. Non-interactive check with facelock devices if sudo is cached or passwordless
-  if command -v facelock >/dev/null 2>&1; then
-    if sudo -n facelock devices 2>/dev/null | grep -q '\[IR\]'; then
-      return 0
-    fi
-  fi
-
-  # 2. Unprivileged check via v4l2-ctl for IR typical pixel formats (GREY, Y16, etc.)
+  # 1. Unprivileged check via v4l2-ctl for IR typical pixel formats (GREY, Y16, etc.)
   if command -v v4l2-ctl >/dev/null 2>&1; then
     for dev in /dev/video*; do
       [[ -e "$dev" ]] || continue
@@ -669,7 +671,7 @@ has_ir_camera() {
     done
   fi
 
-  # 3. Check sysfs device names
+  # 2. Check sysfs device names
   for name_file in /sys/class/video4linux/video*/name; do
     [[ -f "$name_file" ]] || continue
     if grep -iq -E "infrared|\bir\b" "$name_file" 2>/dev/null; then
@@ -677,7 +679,7 @@ has_ir_camera() {
     fi
   done
 
-  # 4. Interactive fallback via sudo facelock devices if facelock exists and in terminal
+  # 3. Interactive fallback via sudo facelock devices if facelock exists and in terminal
   if [[ -t 0 ]] && command -v facelock >/dev/null 2>&1; then
     if sudo facelock devices 2>/dev/null | grep -q '\[IR\]'; then
       return 0
@@ -702,7 +704,7 @@ do_setup() {
     local allow_non_ir=false
     if command -v gum >/dev/null 2>&1; then
       if gum confirm "Are you sure you want to use a non-IR camera for face unlock?" \
-          --affirmative="Use non-IR camera" \
+          --affirmative="Understood" \
           --negative="Cancel"; then
         allow_non_ir=true
       fi
@@ -720,9 +722,7 @@ do_setup() {
       echo "✓ Disabled require_ir requirement for regular RGB camera."
     else
       echo ""
-      echo "Applying require_ir = true in /etc/facelock/config.toml..."
       do_set_require_ir "true"
-      echo ""
       echo "Notice: require_ir remains enabled."
       echo "It will not be possible to use face unlock since there is no camera available to use."
       echo ""
@@ -788,9 +788,17 @@ cmd_hyprlock_toggle() {
 
 cmd_set_require_ir() {
   local new_val="${1:-true}"
+  local cfg="/etc/facelock/config.toml"
 
-  # Attempt passwordless sudo first
-  if sudo -n true 2>/dev/null; then
+  # Don't change require_ir to true if already true or commented out (enabled by default)
+  if [[ "$new_val" == "true" ]]; then
+    if [[ ! -f "$cfg" ]] || ! grep -qE '^[[:space:]]*require_ir[[:space:]]*=[[:space:]]*false' "$cfg"; then
+      return 0
+    fi
+  fi
+
+  # Apply directly if running as root
+  if [[ $EUID -eq 0 ]]; then
     do_set_require_ir "$new_val"
     return $?
   fi
