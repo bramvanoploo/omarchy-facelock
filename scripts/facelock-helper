@@ -286,6 +286,33 @@ cmd_install_lock_face_pam() {
   launch_terminal "bash '$helper_path' do-install-lock-face-pam"
 }
 
+do_remove_lock_face_pam() {
+  local target="/etc/pam.d/omarchy-lock-face"
+  echo "=== Remove Lock Screen Support ==="
+  echo ""
+  if [[ -f "$target" ]]; then
+    echo "Removing $target..."
+    if sudo rm -f "$target"; then
+      echo "✓ Lock screen support removed ($target deleted)."
+      sleep 1
+      return 0
+    else
+      echo "Error: Failed to remove $target"
+      sleep 2
+      return 1
+    fi
+  else
+    echo "Notice: $target does not exist."
+    sleep 1
+    return 0
+  fi
+}
+
+cmd_remove_lock_face_pam() {
+  local helper_path="$0"
+  launch_terminal "bash '$helper_path' do-remove-lock-face-pam"
+}
+
 do_uninstall() {
   echo "=== Uninstall Facelock ==="
   echo ""
@@ -666,6 +693,12 @@ case "${1:-status}" in
     ;;
   do-install-lock-face-pam)
     do_install_lock_face_pam
+    ;;
+  remove-lock-face-pam)
+    cmd_remove_lock_face_pam
+    ;;
+  do-remove-lock-face-pam)
+    do_remove_lock_face_pam
     ;;
   edit-config)
     cmd_edit_config

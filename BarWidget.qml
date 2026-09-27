@@ -552,16 +552,16 @@ Panel {
 
                 Button {
                   width: parent.width
-                  text: root.status.lockFacePamExists ? "Reinstall lock screen support" : "Install lock screen support"
-                  iconText: "󰌾"
-                  tooltipText: "Install /etc/pam.d/omarchy-lock-face for Lock Screen Explorer"
+                  text: root.status.lockFacePamExists ? "Remove lock screen support" : "Install lock screen support"
+                  iconText: root.status.lockFacePamExists ? "󰆴" : "󰌾"
+                  tooltipText: root.status.lockFacePamExists ? "Remove /etc/pam.d/omarchy-lock-face" : "Install /etc/pam.d/omarchy-lock-face for Lock Screen Explorer"
                   bordered: true
                   onClicked: {
                     if (root.status.lockFacePamExists) {
                       root.askConfirmation(
-                        "The PAM file /etc/pam.d/omarchy-lock-face is already present.\n\nDo you want to overwrite it with the recommended configuration?",
-                        "Overwrite",
-                        function() { root.runAction("install-lock-face-pam") }
+                        "Are you sure you want to remove lock screen support? This will delete /etc/pam.d/omarchy-lock-face.",
+                        "Remove",
+                        function() { root.runAction("remove-lock-face-pam") }
                       )
                     } else {
                       root.askConfirmation(
