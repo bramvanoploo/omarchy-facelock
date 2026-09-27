@@ -578,7 +578,7 @@ Panel {
                   width: parent.width
                   text: "Edit Configuration"
                   iconText: "󰏫"
-                  tooltipText: "Edit config.toml with sudo"
+                  tooltipText: ""
                   bordered: true
                   onClicked: root.runAction("edit-config")
                 }
