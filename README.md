@@ -30,15 +30,15 @@ omarchy plugin add https://github.com/bramvanoploo/omarchy-facelock.git --enable
 Or manually:
 
 ```bash
-mkdir -p ~/.config/omarchy/plugins/omarchy-facelock
-cp -r * ~/.config/omarchy/plugins/omarchy-facelock/
+mkdir -p ~/.config/omarchy/plugins/bramvanoploo.omarchy-facelock
+cp -r * ~/.config/omarchy/plugins/bramvanoploo.omarchy-facelock/
 omarchy-shell shell rescanPlugins
-omarchy plugin enable omarchy-facelock --section right
+omarchy plugin enable bramvanoploo.omarchy-facelock --section right
 ```
 
 ## Update or remove
 
 ```bash
-omarchy plugin update omarchy-facelock --yes
-omarchy plugin remove omarchy-facelock --yes
+omarchy plugin update bramvanoploo.omarchy-facelock --yes
+omarchy plugin remove bramvanoploo.omarchy-facelock --yes
 ```
