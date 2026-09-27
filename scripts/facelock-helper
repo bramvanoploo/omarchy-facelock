@@ -233,12 +233,26 @@ do_install_lock_face_pam() {
   echo "=== Install Lock Screen Support ==="
   echo ""
 
-  # 1. Add facelock support for system-auth
+  # 1. Add facelock support for system PAM services
   echo "Adding Facelock support for system-auth..."
   if sudo facelock pam add --service system-auth --allow-sensitive --yes; then
     echo "✓ Facelock added to system-auth."
   else
     echo "Warning: Could not configure system-auth with facelock."
+  fi
+
+  echo "Adding Facelock support for system-login..."
+  if sudo facelock pam add --service system-login --allow-sensitive --yes; then
+    echo "✓ Facelock added to system-login."
+  else
+    echo "Warning: Could not configure system-login with facelock."
+  fi
+
+  echo "Adding Facelock support for system-local-login..."
+  if sudo facelock pam add --service system-local-login --yes; then
+    echo "✓ Facelock added to system-local-login."
+  else
+    echo "Warning: Could not configure system-local-login with facelock."
   fi
   echo ""
 
@@ -301,11 +315,13 @@ do_remove_lock_face_pam() {
   echo "=== Remove Lock Screen Support ==="
   echo ""
 
-  # 1. Remove facelock from system-auth
+  # 1. Remove facelock from PAM services
   if command -v facelock >/dev/null 2>&1; then
-    echo "Removing Facelock from system-auth PAM service..."
+    echo "Removing Facelock from system PAM services..."
     sudo facelock pam remove --service system-auth || true
-    echo "✓ Removed Facelock from system-auth."
+    sudo facelock pam remove --service system-login || true
+    sudo facelock pam remove --service system-local-login || true
+    echo "✓ Removed Facelock from system PAM services."
     echo ""
   fi
 
