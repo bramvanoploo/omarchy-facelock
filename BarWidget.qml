@@ -16,6 +16,7 @@ Panel {
   property string confirmMessage: ""
   property string confirmButtonText: "Confirm"
   property var confirmAction: null
+  property var confirmCancelAction: null
   property bool toolsOverlayOpen: false
   property bool lockPamPromptShownThisOpen: false
 
@@ -28,14 +29,20 @@ Panel {
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
   function checkLockExplorerPam() {
-    if (lockPamPromptShownThisOpen) return
+    if (!root.opened || lockPamPromptShownThisOpen) return
     if (root.status.lockExplorerInstalled && !root.status.lockFacePamExists && !root.confirmOpen && !root.toolsOverlayOpen) {
       lockPamPromptShownThisOpen = true
       root.askConfirmation(
         "The \"Lock Screen Explorer\" plugin is installed, but /etc/pam.d/omarchy-lock-face does not exist.\n\nThis PAM file is needed to support face unlock from the lockscreen with the \"Lock Screen Explorer\" plugin.\n\nWould you like to create it now?",
         "Create",
         function() {
+          root.confirmOpen = false
+          root.close()
           root.runAction("install-lock-face-pam")
+        },
+        function() {
+          root.confirmOpen = false
+          root.close()
         }
       )
     }
@@ -65,25 +72,32 @@ Panel {
     }
   }
 
-  function askConfirmation(msg, btnText, action) {
+  function askConfirmation(msg, btnText, action, cancelAction) {
     confirmMessage = msg
     confirmButtonText = btnText
     confirmAction = action
+    confirmCancelAction = cancelAction !== undefined ? cancelAction : null
     confirmOpen = true
   }
 
   function handleConfirmed() {
     confirmOpen = false
-    if (confirmAction) {
-      var act = confirmAction
-      confirmAction = null
+    var act = confirmAction
+    confirmAction = null
+    confirmCancelAction = null
+    if (act) {
       act()
     }
   }
 
   function handleCanceled() {
     confirmOpen = false
+    var cancelAct = confirmCancelAction
     confirmAction = null
+    confirmCancelAction = null
+    if (cancelAct) {
+      cancelAct()
+    }
   }
 
   implicitWidth: button.implicitWidth
