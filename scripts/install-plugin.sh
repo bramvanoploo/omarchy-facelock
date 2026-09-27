@@ -2,7 +2,8 @@
 set -eo pipefail
 
 PLUGIN_SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TARGET_DIR="$HOME/.config/omarchy/plugins/omarchy-facelock"
+PLUGIN_ID=$(jq -r .id "$PLUGIN_SRC/manifest.json")
+TARGET_DIR="$HOME/.config/omarchy/plugins/$PLUGIN_ID"
 
 echo "Validating plugin..."
 omarchy-plugin-validate "$PLUGIN_SRC"
@@ -18,11 +19,13 @@ cp -r "$PLUGIN_SRC/scripts/facelock-helper" "$TARGET_DIR/scripts/"
 chmod +x "$TARGET_DIR/scripts/facelock-helper"
 
 echo "Rescanning Omarchy plugins..."
-omarchy-shell shell rescanPlugins
-sleep 1
+omarchy-shell -q shell rescanPlugins 2>/dev/null || true
+sleep 0.5
 
-PLUGIN_ID=$(jq -r .id "$PLUGIN_SRC/manifest.json")
 echo "Enabling $PLUGIN_ID widget on the right bar..."
-omarchy plugin enable "$PLUGIN_ID" --section right || true
+omarchy plugin enable "$PLUGIN_ID" --section right >/dev/null 2>&1 || true
 
-echo "Facelock plugin installed and enabled successfully!"
+echo "Restarting Omarchy shell..."
+omarchy restart shell || true
+
+echo "✓ Facelock plugin installed and reloaded successfully!"

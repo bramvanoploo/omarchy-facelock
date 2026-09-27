@@ -2,6 +2,18 @@
 set -eo pipefail
 
 check_installed() {
+  if compgen -G "/var/lib/pacman/local/facelock-bin-*" >/dev/null 2>&1; then
+    echo "facelock-bin"
+    return 0
+  fi
+  if compgen -G "/var/lib/pacman/local/facelock-[0-9]*" >/dev/null 2>&1; then
+    echo "facelock"
+    return 0
+  fi
+  if command -v facelock >/dev/null 2>&1; then
+    echo "facelock"
+    return 0
+  fi
   if pacman -Q facelock-bin >/dev/null 2>&1; then
     echo "facelock-bin"
     return 0
@@ -10,25 +22,23 @@ check_installed() {
     echo "facelock"
     return 0
   fi
-  if command -v facelock >/dev/null 2>&1; then
-    echo "facelock"
-    return 0
-  fi
   return 1
 }
 
 get_require_ir() {
   local cfg="/etc/facelock/config.toml"
-  if [[ -f "$cfg" ]]; then
-    local val
-    val=$(grep -E '^[[:space:]]*require_ir[[:space:]]*=' "$cfg" 2>/dev/null | tail -n 1 | sed -E 's/^[[:space:]]*require_ir[[:space:]]*=[[:space:]]*//; s/[[:space:]]*#.*$//' | tr -d '[:space:]')
-    if [[ "$val" == "false" ]]; then
-      echo "false"
-      return 0
-    elif [[ "$val" == "true" ]]; then
-      echo "true"
-      return 0
-    fi
+  if [[ -r "$cfg" ]]; then
+    local line val="true"
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      line="${line%%#*}"
+      line="${line#"${line%%[![:space:]]*}"}"
+      line="${line%"${line##*[![:space:]]}"}"
+      if [[ "$line" =~ ^require_ir[[:space:]]*=[[:space:]]*(true|false) ]]; then
+        val="${BASH_REMATCH[1]}"
+      fi
+    done < "$cfg"
+    echo "$val"
+    return 0
   fi
   echo "true"
 }
@@ -53,8 +63,11 @@ EOF
     return 0
   fi
 
-  local version
-  version=$(facelock --version 2>/dev/null | awk '{print $2}' || echo "unknown")
+  local version="unknown"
+  if command -v facelock >/dev/null 2>&1; then
+    read -r _ version < <(facelock --version 2>/dev/null || echo "facelock unknown")
+    : "${version:=unknown}"
+  fi
 
   local configured=false
   if [[ -f /etc/facelock/config.toml ]]; then
@@ -69,10 +82,8 @@ EOF
   local enroll_json
   enroll_json=$(timeout 1.5s facelock is-enrolled --json 2>/dev/null || true)
   if [[ -n "$enroll_json" ]]; then
-    enrolled=$(jq -r '.enrolled // false' <<<"$enroll_json" 2>/dev/null || echo false)
-    model_count=$(jq -r '.models // 0' <<<"$enroll_json" 2>/dev/null || echo 0)
-    local raw_updated
-    raw_updated=$(jq -r '.updated // empty' <<<"$enroll_json" 2>/dev/null || true)
+    local raw_updated=""
+    read -r enrolled model_count raw_updated < <(jq -r '[.enrolled // false, .models // 0, .updated // "null"] | @tsv' <<<"$enroll_json" 2>/dev/null || echo "false 0 null")
     if [[ -n "$raw_updated" && "$raw_updated" != "null" ]]; then
       last_updated="\"$raw_updated\""
     fi
@@ -110,60 +121,6 @@ EOF
 EOF
 }
 
-: "${BACKUP_BASE:=${HOME}/.local/state/omarchy/facelock/pam-backups}"
-
-has_initial_pam_backup() {
-  if [[ -d "${BACKUP_BASE}/initial" ]]; then
-    return 0
-  fi
-  if [[ -d "${BACKUP_BASE}/pre-install" ]]; then
-    return 0
-  fi
-  if find "$BACKUP_BASE" -mindepth 1 -maxdepth 1 -type d \( -name "pam-*-initial" -o -name "pam-*-pre-install" \) 2>/dev/null | grep -q .; then
-    return 0
-  fi
-  return 1
-}
-
-backup_pam() {
-  local tag="${1:-manual}"
-  local timestamp
-  timestamp=$(date +%Y%m%d_%H%M%S)
-  local name="pam-${timestamp}-${tag}"
-  local target="${BACKUP_BASE}/${name}"
-
-  mkdir -p "$target"
-  cp -a /etc/pam.d/. "$target/"
-  local count
-  count=$(find "$target" -type f | grep -v meta.json | wc -l)
-
-  cat > "$target/meta.json" <<EOF
-{
-  "id": "$name",
-  "tag": "$tag",
-  "timestamp": "$timestamp",
-  "date": "$(date -Iseconds)",
-  "fileCount": $count
-}
-EOF
-
-  if [[ "$tag" == "pre-install" || "$tag" == "initial" ]]; then
-    if [[ ! -e "${BACKUP_BASE}/initial" ]]; then
-      ln -sfn "$name" "${BACKUP_BASE}/initial"
-    fi
-    if [[ ! -e "${BACKUP_BASE}/pre-install" ]]; then
-      ln -sfn "$name" "${BACKUP_BASE}/pre-install"
-    fi
-    if [[ "$tag" == "initial" ]]; then
-      ln -sfn "$name" "${BACKUP_BASE}/initial"
-    elif [[ "$tag" == "pre-install" ]]; then
-      ln -sfn "$name" "${BACKUP_BASE}/pre-install"
-    fi
-  fi
-  ln -sfn "$name" "${BACKUP_BASE}/latest"
-
-  echo "$target"
-}
 
 launch_terminal() {
   local cmd="$*"
@@ -194,12 +151,7 @@ launch_terminal() {
 do_install() {
   echo "=== Facelock Installation ==="
   echo ""
-  echo "Step 1/2: Backing up /etc/pam.d before installation..."
-  local target
-  target=$(backup_pam pre-install)
-  echo "✓ PAM backup saved to: $target"
-  echo ""
-  echo "Step 2/2: Installing facelock-bin via yay..."
+  echo "Installing facelock-bin via yay..."
   if yay -S --noconfirm facelock-bin; then
     echo ""
     echo "✓ Installation complete."
@@ -218,76 +170,8 @@ cmd_install() {
   launch_terminal "bash '$helper_path' do-install"
 }
 
-cmd_backup_pam_user() {
-  local helper_path="$0"
-  launch_terminal "echo '=== Create PAM Backup ==='; echo ''; echo 'Backing up all files in /etc/pam.d...'; target=\$(bash '$helper_path' backup-pam manual) && echo \"✓ PAM backup created at: \$target\" && echo \"✓ Total \$(find \"\$target\" -type f | grep -v meta.json | wc -l) files backed up.\" && sleep 2"
-}
-
-do_restore_pam() {
-  echo "=== Restore PAM Configuration ==="
-  echo ""
-  mkdir -p "$BACKUP_BASE"
-
-  local backups=()
-  while IFS= read -r dir; do
-    [[ -n "$dir" && -d "$dir" ]] && backups+=("$(basename "$dir")")
-  done < <(find "$BACKUP_BASE" -mindepth 1 -maxdepth 1 -type d -name "pam-*" 2>/dev/null | sort -r)
-
-  if [[ ${#backups[@]} -eq 0 ]]; then
-    echo "No PAM backups found in $BACKUP_BASE."
-    echo ""
-    read -rp "Press Enter to close..."
-    return 1
-  fi
-
-  echo "Available PAM backups:"
-  local chosen=""
-  if command -v gum >/dev/null 2>&1; then
-    chosen=$(gum choose --header="Select PAM backup to restore to /etc/pam.d:" "${backups[@]}" "Cancel")
-    if [[ -z "$chosen" || "$chosen" == "Cancel" ]]; then
-      echo "Restore cancelled."
-      sleep 1
-      return 0
-    fi
-  else
-    PS3="Select backup number (or Cancel): "
-    select b in "${backups[@]}" "Cancel"; do
-      if [[ "$b" == "Cancel" || -z "$b" ]]; then
-        echo "Restore cancelled."
-        return 0
-      fi
-      chosen="$b"
-      break
-    done
-  fi
-
-  echo ""
-  echo "Selected backup: $chosen"
-  if command -v gum >/dev/null 2>&1; then
-    if ! gum confirm "Are you sure you want to restore /etc/pam.d from $chosen?"; then
-      echo "Restore cancelled."
-      sleep 1
-      return 0
-    fi
-  else
-    read -rp "Are you sure you want to restore /etc/pam.d from $chosen? [y/N]: " confirm
-    [[ "$confirm" =~ ^[Yy]$ ]] || { echo "Restore cancelled."; return 0; }
-  fi
-
-  echo ""
-  echo "Restoring PAM configuration from $chosen (requires sudo)..."
-  sudo cp -a "$BACKUP_BASE/$chosen/." /etc/pam.d/
-  echo "✓ PAM configuration has been successfully restored from $chosen."
-  sleep 2
-}
-
-cmd_restore_pam() {
-  local helper_path="$0"
-  launch_terminal "bash '$helper_path' do-restore-pam"
-}
-
 do_uninstall() {
-  echo "=== Uninstall Facelock & Restore PAM ==="
+  echo "=== Uninstall Facelock ==="
   echo ""
 
   # 1. Clear all enrolled face models before starting the uninstall
@@ -313,31 +197,18 @@ do_uninstall() {
     sudo systemctl disable --now facelock 2>/dev/null || true
   fi
 
-  # 4. Restore PAM backup if available
-  local pam_restored=false
-  local target_backup=""
-
-  if [[ -d "$BACKUP_BASE/initial" ]]; then
-    target_backup="$BACKUP_BASE/initial"
-  elif [[ -d "$BACKUP_BASE/pre-install" ]]; then
-    target_backup="$BACKUP_BASE/pre-install"
-  elif [[ -d "$BACKUP_BASE/latest" ]]; then
-    target_backup="$BACKUP_BASE/latest"
-  else
-    target_backup=$(find "$BACKUP_BASE" -mindepth 1 -maxdepth 1 -type d -name "pam-*" 2>/dev/null | sort -r | head -n 1)
-  fi
-
-  if [[ -n "$target_backup" && -d "$target_backup" ]]; then
-    local bname
-    bname=$(basename "$(readlink -f "$target_backup" 2>/dev/null || echo "$target_backup")")
-    echo "Restoring PAM configuration from backup: $bname..."
-    sudo cp -a "$target_backup/." /etc/pam.d/
-    pam_restored=true
-    echo "✓ Original PAM files restored."
-  else
-    echo "Notice: No PAM backup found in $BACKUP_BASE."
-    echo "Cleaning up any remaining pam_facelock lines in /etc/pam.d/..."
-    sudo sed -i '/pam_facelock\.so/d' /etc/pam.d/* 2>/dev/null || true
+  # 4. Remove Facelock from PAM service files
+  if command -v facelock >/dev/null 2>&1; then
+    echo "Removing Facelock PAM configuration..."
+    local filename
+    for file in /etc/pam.d/*; do
+      if [[ -f "$file" ]] && (grep -qs "pam_facelock\.so" "$file" || sudo grep -qs "pam_facelock\.so" "$file"); then
+        filename=$(basename "$file")
+        echo "Removing PAM service: $filename..."
+        sudo facelock pam remove --service "$filename" || true
+      fi
+    done
+    echo "✓ Facelock removed from PAM service files."
   fi
 
   # 5. Uninstall facelock package
@@ -353,6 +224,7 @@ do_uninstall() {
   echo ""
   echo "Removing any remaining enrolled face data..."
   sudo rm -rf /var/lib/facelock/enrolled /var/lib/facelock/facelock.db* 2>/dev/null || true
+  rm -rf "${HOME}/.local/state/omarchy/facelock/pam-backups" 2>/dev/null || true
   echo "✓ Enrolled faces data removed."
 
   # 7. Clean up sudoers rule if present
@@ -362,9 +234,6 @@ do_uninstall() {
 
   echo ""
   echo "✓ Facelock uninstalled successfully."
-  if [[ "$pam_restored" == "true" ]]; then
-    echo "✓ PAM configuration restored."
-  fi
   sleep 2
 }
 
@@ -487,16 +356,6 @@ has_ir_camera() {
 }
 
 do_setup() {
-  if ! has_initial_pam_backup; then
-    echo "=== Initial PAM Backup ==="
-    echo "No initial backup of /etc/pam.d was found."
-    echo "Creating initial backup before running setup wizard..."
-    local target
-    target=$(backup_pam initial)
-    echo "✓ Initial PAM backup created at: $target"
-    echo ""
-  fi
-
   echo "=== Checking Camera Capabilities ==="
   if has_ir_camera; then
     echo "✓ Infrared camera detected."
@@ -640,9 +499,6 @@ case "${1:-status}" in
   do-install)
     do_install
     ;;
-  has-initial-backup)
-    has_initial_pam_backup
-    ;;
   has-ir-camera)
     has_ir_camera
     ;;
@@ -677,19 +533,6 @@ case "${1:-status}" in
     ;;
   setup-sudoers)
     cmd_setup_sudoers
-    ;;
-  backup-pam)
-    shift
-    backup_pam "$@"
-    ;;
-  backup-pam-user)
-    cmd_backup_pam_user
-    ;;
-  restore-pam-menu)
-    cmd_restore_pam
-    ;;
-  do-restore-pam)
-    do_restore_pam
     ;;
   uninstall)
     cmd_uninstall

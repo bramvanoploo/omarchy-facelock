@@ -250,7 +250,7 @@ Panel {
             width: parent.width
             text: "Install Facelock"
             iconText: "󰇚"
-            tooltipText: "Backup PAM and install"
+            tooltipText: "Install facelock-bin"
             bordered: true
             accent: root.accent
             onClicked: root.runAction("install")
@@ -349,14 +349,14 @@ Panel {
               onClicked: root.runAction("preview")
             }
 
-              Button {
-                width: parent.cellWidth
-                text: "List Cameras"
-                iconText: "󰄀"
-                tooltipText: "Show available video devices"
-                bordered: true
-                onClicked: root.runAction("devices")
-              }
+            Button {
+              width: parent.cellWidth
+              text: "List Cameras"
+              iconText: "󰄀"
+              tooltipText: "Show available video devices"
+              bordered: true
+              onClicked: root.runAction("devices")
+            }
             }
           }
         }
@@ -531,39 +531,15 @@ Panel {
                   foreground: root.foreground
                 }
 
-                Row {
-                  width: parent.width
-                  spacing: Style.space(8)
-                  readonly property real cellWidth: (width - spacing) / 2
-
-                  Button {
-                    width: parent.cellWidth
-                    text: "Backup PAM"
-                    iconText: "󰁯"
-                    tooltipText: "Create fresh PAM backup"
-                    bordered: true
-                    onClicked: root.runAction("backup-pam-user")
-                  }
-
-                  Button {
-                    width: parent.cellWidth
-                    text: "Restore PAM"
-                    iconText: "󰜉"
-                    tooltipText: "Restore PAM from backup"
-                    bordered: true
-                    onClicked: root.runAction("restore-pam-menu")
-                  }
-                }
-
                 Button {
                   width: parent.width
                   text: "Uninstall Facelock"
                   iconText: "󰆴"
-                  tooltipText: "Uninstall and restore PAM"
+                  tooltipText: "Uninstall Facelock"
                   bordered: true
                   accent: Color.urgent
                   onClicked: {
-                    root.askConfirmation("Are you sure you want to uninstall Facelock and restore PAM configuration?", "Uninstall", function() { root.runAction("uninstall") })
+                    root.askConfirmation("Are you sure you want to uninstall Facelock?", "Uninstall", function() { root.runAction("uninstall") })
                   }
                 }
               }
