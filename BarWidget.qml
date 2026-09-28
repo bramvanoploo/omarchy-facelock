@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import Quickshell.Wayland
 import qs.Commons
 import qs.Ui
 import "FacelockModel.js" as Model
@@ -34,7 +35,7 @@ Panel {
     if (root.status.lockExplorerInstalled && !root.status.lockFacePamExists && !root.confirmOpen && !root.toolsOverlayOpen) {
       lockPamPromptShownThisOpen = true
       root.askConfirmation(
-        "Lock Screen Explorer detected. Enable face unlock?\n\nThis creates /etc/pam.d/omarchy-lock-face and configures system-auth, system-login, and system-local-login in /etc/pam.d/.\n\nAll changes are automatically reverted when disabling lock screen support or uninstalling facelock.",
+        "Lock Screen Explorer detected. Enable face unlock?\n\nThis creates /etc/pam.d/omarchy-lock-face for the Lock Screen Explorer plugin.\n\nIt will be removed automatically when disabling lock screen support or uninstalling facelock.",
         "Enable",
         function() {
           root.confirmOpen = false
@@ -97,7 +98,7 @@ Panel {
     var cancelAct = confirmCancelAction
     confirmAction = null
     confirmCancelAction = null
-    if (cancelAct && root.opened) {
+    if (cancelAct) {
       cancelAct()
     }
   }
@@ -112,7 +113,9 @@ Panel {
       checkLockExplorerPam()
     } else {
       toolsOverlayOpen = false
-      handleCanceled()
+      if (!confirmOpen) {
+        handleCanceled()
+      }
     }
   }
 
@@ -600,7 +603,7 @@ Panel {
                       )
                     } else {
                       root.askConfirmation(
-                        "Enable lock screen face unlock?\n\nThis creates /etc/pam.d/omarchy-lock-face and configures system-auth, system-login, and system-local-login in /etc/pam.d/.\n\nAll changes are automatically reverted when disabling lock screen support or uninstalling facelock.",
+                        "Enable lock screen face unlock?\n\nThis creates /etc/pam.d/omarchy-lock-face for the Lock Screen Explorer plugin.\n\nIt will be removed automatically when disabling lock screen support or uninstalling facelock.",
                         "Enable",
                         function() { root.runAction("install-lock-face-pam") }
                       )
@@ -636,19 +639,51 @@ Panel {
                 }
               }
             }
-          }
         }
+      }
+    }
+  }
+
+  PanelWindow {
+    id: confirmModalWindow
+    visible: root.confirmOpen
+    screen: button && button.QsWindow && button.QsWindow.window ? button.QsWindow.window.screen : null
+    anchors { top: true; bottom: true; left: true; right: true }
+    color: "transparent"
+    WlrLayershell.namespace: "omarchy-facelock-dialog"
+    WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.keyboardFocus: root.confirmOpen ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+    exclusionMode: ExclusionMode.Ignore
+
+    onVisibleChanged: {
+      if (visible) {
+        Qt.callLater(function() {
+          if (confirmModalWindow.visible) modalKeyCatcher.forceActiveFocus()
+        })
+      }
+    }
+
+    Item {
+      id: modalKeyCatcher
+      anchors.fill: parent
+      focus: true
+
+      Keys.onPressed: function(event) {
+        if (confirmDialog.handleKey(event)) {
+          event.accepted = true
+        }
+      }
 
       ConfirmDialog {
         id: confirmDialog
         anchors.fill: parent
         opened: root.confirmOpen
-        z: 100
         message: root.confirmMessage
         confirmText: root.confirmButtonText
         cancelText: root.confirmCancelText
         background: Color.popups.background
         foreground: root.foreground
+        scrim: Qt.rgba(0, 0, 0, 0.6)
         selectedText: root.accent
         fontFamily: root.fontFamily
         cornerRadius: Style.cornerRadius

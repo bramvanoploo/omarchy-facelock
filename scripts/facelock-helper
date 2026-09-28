@@ -214,143 +214,10 @@ cmd_install() {
   launch_terminal "bash '$helper_path' do-install"
 }
 
-pam_add_facelock_to_system_auth() {
-  local src="$1"
-  local dst="$2"
-  python3 -c '
-import sys, re
-
-with open(sys.argv[1], "r") as f:
-    lines = f.readlines()
-
-# 1. Find line with the highest success= value
-max_val = -1
-max_idx = -1
-for i, line in enumerate(lines):
-    m = re.search(r"success=(\d+)", line)
-    if m:
-        val = int(m.group(1))
-        if val > max_val:
-            max_val = val
-            max_idx = i
-
-if max_idx == -1:
-    sys.stderr.write("Error: No success= entry found in PAM file.\n")
-    sys.exit(1)
-
-# 2. Place pam_facelock.so directly below the line with highest success=
-new_line = "auth       [success=1 default=ignore]  pam_facelock.so\n"
-lines.insert(max_idx + 1, new_line)
-
-# 3. Look for all success= entries, grouped by section/chain, and make them incremental
-# (top to bottom, high to low down to 1)
-groups = []
-current_group = []
-for i, line in enumerate(lines):
-    stripped = line.strip()
-    has_success = bool(re.search(r"success=\d+", line))
-    is_module = bool(re.match(r"^-?(auth|account|password|session)\b", stripped))
-    if has_success:
-        current_group.append(i)
-    elif is_module:
-        if current_group:
-            groups.append(current_group)
-            current_group = []
-if current_group:
-    groups.append(current_group)
-
-for g in groups:
-    count = len(g)
-    for step, idx in enumerate(g):
-        new_val = count - step
-        lines[idx] = re.sub(r"success=\d+", f"success={new_val}", lines[idx])
-
-with open(sys.argv[2], "w") as f:
-    f.writelines(lines)
-' "$src" "$dst"
-}
-
-pam_revert_facelock_from_system_auth() {
-  local src="$1"
-  local dst="$2"
-  python3 -c '
-import sys, re
-
-with open(sys.argv[1], "r") as f:
-    lines = [line for line in f.readlines() if "pam_facelock.so" not in line]
-
-groups = []
-current_group = []
-for i, line in enumerate(lines):
-    stripped = line.strip()
-    has_success = bool(re.search(r"success=\d+", line))
-    is_module = bool(re.match(r"^-?(auth|account|password|session)\b", stripped))
-    if has_success:
-        current_group.append(i)
-    elif is_module:
-        if current_group:
-            groups.append(current_group)
-            current_group = []
-if current_group:
-    groups.append(current_group)
-
-for g in groups:
-    count = len(g)
-    for step, idx in enumerate(g):
-        new_val = count - step
-        lines[idx] = re.sub(r"success=\d+", f"success={new_val}", lines[idx])
-
-with open(sys.argv[2], "w") as f:
-    f.writelines(lines)
-' "$src" "$dst"
-}
-
 do_install_lock_face_pam() {
   local target="/etc/pam.d/omarchy-lock-face"
-  local sys_auth="/etc/pam.d/system-auth"
   echo "=== Install Lock Screen Support ==="
   echo ""
-
-  # 1. Add facelock support for system PAM services
-  echo "Configuring Facelock support for system-auth..."
-  if grep -qs "pam_facelock\.so" "$sys_auth"; then
-    echo "✓ Facelock line already present in $sys_auth."
-  else
-    local tmp_auth
-    tmp_auth=$(mktemp)
-    if pam_add_facelock_to_system_auth "$sys_auth" "$tmp_auth"; then
-      sudo cp "$tmp_auth" "$sys_auth"
-      sudo chmod 0644 "$sys_auth"
-      sudo chown root:root "$sys_auth"
-      rm -f "$tmp_auth"
-      echo "✓ Configured $sys_auth."
-    else
-      rm -f "$tmp_auth"
-      echo "Warning: Could not configure $sys_auth."
-    fi
-  fi
-  sudo rm -f /etc/pam.d/system-auth.facelock-backup 2>/dev/null || true
-
-  echo "Configuring Facelock support for system-login..."
-  if grep -qs "pam_facelock\.so" /etc/pam.d/system-login; then
-    echo "✓ Facelock line already present in /etc/pam.d/system-login."
-  elif sudo facelock pam add --service system-login --allow-sensitive --yes; then
-    echo "✓ Facelock added to system-login."
-  else
-    echo "Warning: Could not configure system-login with facelock."
-  fi
-
-  echo "Configuring Facelock support for system-local-login..."
-  if grep -qs "pam_facelock\.so" /etc/pam.d/system-local-login; then
-    echo "✓ Facelock line already present in /etc/pam.d/system-local-login."
-  elif sudo facelock pam add --service system-local-login --yes; then
-    echo "✓ Facelock added to system-local-login."
-  else
-    echo "Warning: Could not configure system-local-login with facelock."
-  fi
-  echo ""
-
-  # 2. Create /etc/pam.d/omarchy-lock-face
   echo "Setting up /etc/pam.d/omarchy-lock-face for Lock Screen Explorer..."
   local tmp
   tmp=$(mktemp)
@@ -365,7 +232,6 @@ EOF
 
   local ref_file="/etc/pam.d/sudo"
   [[ ! -f "$ref_file" ]] && ref_file="/etc/pam.d/other"
-  [[ ! -f "$ref_file" ]] && ref_file="/etc/pam.d/system-auth"
 
   local perms="644"
   local owner="root"
@@ -406,38 +272,9 @@ cmd_install_lock_face_pam() {
 
 do_remove_lock_face_pam() {
   local target="/etc/pam.d/omarchy-lock-face"
-  local sys_auth="/etc/pam.d/system-auth"
   echo "=== Remove Lock Screen Support ==="
   echo ""
 
-  # 1. Revert system-auth PAM file
-  if grep -qs "pam_facelock\.so" "$sys_auth"; then
-    echo "Reverting Facelock in $sys_auth..."
-    local tmp_auth
-    tmp_auth=$(mktemp)
-    if pam_revert_facelock_from_system_auth "$sys_auth" "$tmp_auth"; then
-      sudo cp "$tmp_auth" "$sys_auth"
-      sudo chmod 0644 "$sys_auth"
-      sudo chown root:root "$sys_auth"
-      rm -f "$tmp_auth"
-      echo "✓ Reverted $sys_auth."
-    else
-      rm -f "$tmp_auth"
-      echo "Warning: Could not revert $sys_auth."
-    fi
-  fi
-  sudo rm -f /etc/pam.d/system-auth.facelock-backup 2>/dev/null || true
-
-  # 2. Remove facelock from other system PAM services
-  if command -v facelock >/dev/null 2>&1; then
-    echo "Removing Facelock from system PAM services..."
-    sudo facelock pam remove --service system-login || true
-    sudo facelock pam remove --service system-local-login || true
-    echo "✓ Removed Facelock from system PAM services."
-    echo ""
-  fi
-
-  # 3. Remove /etc/pam.d/omarchy-lock-face
   if [[ -f "$target" ]]; then
     echo "Removing $target..."
     if sudo rm -f "$target"; then
@@ -489,21 +326,6 @@ do_uninstall() {
   fi
 
   # 4. Remove Facelock from PAM service files
-  local sys_auth="/etc/pam.d/system-auth"
-  if grep -qs "pam_facelock\.so" "$sys_auth"; then
-    echo "Reverting Facelock in $sys_auth..."
-    local tmp_auth
-    tmp_auth=$(mktemp)
-    if pam_revert_facelock_from_system_auth "$sys_auth" "$tmp_auth"; then
-      sudo cp "$tmp_auth" "$sys_auth"
-      sudo chmod 0644 "$sys_auth"
-      sudo chown root:root "$sys_auth"
-      rm -f "$tmp_auth"
-      echo "✓ Reverted $sys_auth."
-    fi
-  fi
-  sudo rm -f /etc/pam.d/system-auth.facelock-backup 2>/dev/null || true
-
   if [[ -f /etc/pam.d/omarchy-lock-face ]]; then
     sudo rm -f /etc/pam.d/omarchy-lock-face 2>/dev/null || true
   fi
