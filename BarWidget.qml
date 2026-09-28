@@ -34,8 +34,8 @@ Panel {
     if (root.status.lockExplorerInstalled && !root.status.lockFacePamExists && !root.confirmOpen && !root.toolsOverlayOpen) {
       lockPamPromptShownThisOpen = true
       root.askConfirmation(
-        "The \"Lock Screen Explorer\" plugin is installed, but /etc/pam.d/omarchy-lock-face does not exist.\n\nThis PAM file is needed to support face unlock from the lockscreen with the \"Lock Screen Explorer\" plugin.\n\nWould you like to create it now?",
-        "Create",
+        "Lock Screen Explorer detected. Enable face unlock?\n\nThis creates /etc/pam.d/omarchy-lock-face and configures system-auth, system-login, and system-local-login in /etc/pam.d/.\n\nAll changes are automatically reverted when disabling lock screen support or uninstalling facelock.",
+        "Enable",
         function() {
           root.confirmOpen = false
           root.close()
@@ -600,8 +600,8 @@ Panel {
                       )
                     } else {
                       root.askConfirmation(
-                        "Install /etc/pam.d/omarchy-lock-face to enable face unlock with the \"Lock Screen Explorer\" plugin?",
-                        "Install",
+                        "Enable lock screen face unlock?\n\nThis creates /etc/pam.d/omarchy-lock-face and configures system-auth, system-login, and system-local-login in /etc/pam.d/.\n\nAll changes are automatically reverted when disabling lock screen support or uninstalling facelock.",
+                        "Enable",
                         function() { root.runAction("install-lock-face-pam") }
                       )
                     }
