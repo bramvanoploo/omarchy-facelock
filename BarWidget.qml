@@ -39,14 +39,12 @@ Panel {
         "Enable",
         function() {
           root.confirmOpen = false
-          root.close()
-          root.runAction("install-lock-face-pam")
+          root.runAction("install-lock-face-pam", undefined, true)
         },
         function() {
           root.confirmOpen = false
-          root.close()
           root.status.lockExplorerDismissed = true
-          root.runAction("dismiss-lock-explorer-pam")
+          root.runAction("dismiss-lock-explorer-pam", undefined, true)
         }
       )
     }
@@ -65,13 +63,24 @@ Panel {
     statusProc.running = true
   }
 
-  function runAction(action, arg) {
+  function runAction(action, arg, keepOpen) {
     var cmd = ["bash", helper, action]
     if (arg !== undefined && arg !== "") cmd.push(arg)
     if (actionProc.running) actionProc.running = false
     actionProc.command = cmd
     actionProc.running = true
-    if (action !== "hyprlock-toggle" && action !== "require-ir-toggle" && action !== "set-require-ir") {
+    if (keepOpen) return
+    var keepOpenActions = [
+      "hyprlock-toggle",
+      "require-ir-toggle",
+      "set-require-ir",
+      "dismiss-lock-explorer-pam",
+      "install-lock-face-pam",
+      "remove-lock-face-pam",
+      "clear",
+      "uninstall"
+    ]
+    if (keepOpenActions.indexOf(action) === -1) {
       toolsOverlayOpen = false
       root.close()
     }
