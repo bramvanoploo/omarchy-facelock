@@ -33,7 +33,8 @@ function parseStatus(raw) {
     base.package = String(parsed.package || "")
     base.configured = Boolean(parsed.configured)
     base.enrolled = Boolean(parsed.enrolled)
-    base.modelCount = typeof parsed.modelCount === "number" ? parsed.modelCount : 0
+    var count = parseInt(parsed.modelCount, 10)
+    base.modelCount = (!isNaN(count) && count >= 0) ? count : 0
     base.lastUpdated = parsed.lastUpdated || null
     base.daemonRunning = Boolean(parsed.daemonRunning)
     base.hyprlockIntegrated = Boolean(parsed.hyprlockIntegrated)
@@ -84,7 +85,7 @@ function formatDate(ts) {
   try {
     var d
     if (typeof ts === "number") {
-      d = new Date(ts * 1000)
+      d = new Date(ts > 1e11 ? ts : ts * 1000)
     } else {
       d = new Date(ts)
     }

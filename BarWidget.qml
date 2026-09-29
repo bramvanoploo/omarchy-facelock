@@ -68,6 +68,7 @@ Panel {
   function runAction(action, arg) {
     var cmd = ["bash", helper, action]
     if (arg !== undefined && arg !== "") cmd.push(arg)
+    if (actionProc.running) actionProc.running = false
     actionProc.command = cmd
     actionProc.running = true
     if (action !== "hyprlock-toggle" && action !== "require-ir-toggle" && action !== "set-require-ir") {

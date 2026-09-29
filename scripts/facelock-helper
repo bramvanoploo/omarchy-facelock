@@ -43,21 +43,14 @@ STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/facelock"
 DISMISS_PAM_FILE="$STATE_DIR/dismiss_lock_explorer_pam"
 
 is_lock_explorer_installed() {
-  if [[ -d "$HOME/.config/omarchy/plugins/io.github.sirjul1337.lock-explorer" ]]; then
-    return 0
-  fi
-  if [[ -d "/usr/share/omarchy/plugins/io.github.sirjul1337.lock-explorer" ]]; then
-    return 0
-  fi
-  if command -v omarchy >/dev/null 2>&1; then
-    if omarchy plugin list 2>/dev/null | grep -q "^io\.github\.sirjul1337\.lock-explorer[[:space:]]"; then
-      return 0
-    fi
-  fi
-  return 1
+  [[ -d "$HOME/.config/omarchy/plugins/io.github.sirjul1337.lock-explorer" || -d "/usr/share/omarchy/plugins/io.github.sirjul1337.lock-explorer" ]]
 }
 
 is_lock_explorer_enabled() {
+  if ! is_lock_explorer_installed; then
+    return 1
+  fi
+
   if command -v omarchy-shell >/dev/null 2>&1; then
     local plugins_json
     plugins_json=$(timeout 1.5s omarchy-shell shell listPlugins 2>/dev/null || true)
@@ -80,10 +73,6 @@ is_lock_explorer_enabled() {
         return 1
       fi
     fi
-  fi
-
-  if ! is_lock_explorer_installed; then
-    return 1
   fi
 
   if [[ -f "$HOME/.config/omarchy/shell.json" ]]; then
@@ -110,13 +99,12 @@ is_lock_face_pam_installed() {
 
 cmd_status() {
   local lock_explorer_installed=false
+  local lock_explorer_enabled=false
   if is_lock_explorer_installed; then
     lock_explorer_installed=true
-  fi
-
-  local lock_explorer_enabled=false
-  if is_lock_explorer_enabled; then
-    lock_explorer_enabled=true
+    if is_lock_explorer_enabled; then
+      lock_explorer_enabled=true
+    fi
   fi
 
   local lock_face_pam_exists=false
@@ -238,7 +226,13 @@ launch_terminal() {
   # Ensure the stay_focused rule is loaded in the compositor
   hyprctl eval 'o.window({ class = "^(org.omarchy.terminal)$", title = "^(Omarchy Facelock.*)$" }, { stay_focused = true })' >/dev/null 2>&1 || true
 
-  setsid uwsm-app -- xdg-terminal-exec --app-id=org.omarchy.terminal --title="Omarchy Facelock" -e bash -c "$presentation_script" >/dev/null 2>&1 &
+  if command -v uwsm-app >/dev/null 2>&1; then
+    setsid uwsm-app -- xdg-terminal-exec --app-id=org.omarchy.terminal --title="Omarchy Facelock" -e bash -c "$presentation_script" >/dev/null 2>&1 &
+  elif command -v xdg-terminal-exec >/dev/null 2>&1; then
+    setsid xdg-terminal-exec --app-id=org.omarchy.terminal --title="Omarchy Facelock" -e bash -c "$presentation_script" >/dev/null 2>&1 &
+  else
+    setsid alacritty --class org.omarchy.terminal --title "Omarchy Facelock" -e bash -c "$presentation_script" >/dev/null 2>&1 &
+  fi
 
   # Proactively focus the terminal as soon as it maps
   (
@@ -255,9 +249,24 @@ launch_terminal() {
 do_install() {
   echo "=== Facelock Installation ==="
   echo ""
-  echo "Installing facelock-bin via yay..."
 
-  if yay -S --noconfirm facelock-bin; then
+  local aur_helper=""
+  if command -v yay >/dev/null 2>&1; then
+    aur_helper="yay"
+  elif command -v paru >/dev/null 2>&1; then
+    aur_helper="paru"
+  fi
+
+  if [[ -z "$aur_helper" ]]; then
+    echo "Error: Neither 'yay' nor 'paru' AUR helper was found." >&2
+    echo "Please install yay or paru to install facelock-bin." >&2
+    sleep 3
+    return 1
+  fi
+
+  echo "Installing facelock-bin via $aur_helper..."
+
+  if "$aur_helper" -S --noconfirm facelock-bin; then
     echo ""
     echo "✓ Installation complete."
     echo ""
@@ -284,9 +293,9 @@ do_install_lock_face_pam() {
   echo ""
   echo "Setting up /etc/pam.d/omarchy-lock-face for Lock Screen Explorer..."
 
-  # Pre-check: Reject if target is a symlink (prevent symlink redirection attacks)
-  if [[ -L "$target" ]]; then
-    echo "Error: Destination $target is a symlink. Refusing to write." >&2
+  # Pre-check: Reject if target is a symlink or directory
+  if [[ -L "$target" || -d "$target" ]]; then
+    echo "Error: Destination $target is a symlink or directory. Refusing to write." >&2
     sleep 2
     return 1
   fi
@@ -301,11 +310,12 @@ do_install_lock_face_pam() {
   if $sudo_cmd bash -c '
     set -eo pipefail
     target="/etc/pam.d/omarchy-lock-face"
-    if [[ -L "$target" ]]; then
-      echo "Error: $target is a symlink" >&2
+    if [[ -L "$target" || -d "$target" ]]; then
+      echo "Error: $target is a symlink or directory" >&2
       exit 1
     fi
     stage_file=$(mktemp -p /etc/pam.d .omarchy-lock-face.tmp.XXXXXX)
+    trap '\''rm -f "$stage_file"'\'' EXIT INT TERM
     chmod 0644 "$stage_file"
     chown root:root "$stage_file"
     cat << "EOF" > "$stage_file"
@@ -343,7 +353,11 @@ do_remove_lock_face_pam() {
 
   if [[ -e "$target" || -L "$target" ]]; then
     echo "Removing $target..."
-    if sudo rm -f "$target"; then
+    local sudo_cmd=""
+    if [[ $EUID -ne 0 ]]; then
+      sudo_cmd="sudo"
+    fi
+    if $sudo_cmd rm -f "$target"; then
       echo "✓ Lock screen support removed ($target deleted)."
       sleep 1
       return 0
@@ -447,6 +461,11 @@ cmd_uninstall() {
 
 do_edit_config() {
   local cfg="/etc/facelock/config.toml"
+  if [[ -L "$cfg" || -d "$cfg" ]]; then
+    echo "Error: $cfg is a symlink or directory. Refusing to edit." >&2
+    return 1
+  fi
+
   if [[ ! -f "$cfg" ]]; then
     sudo mkdir -p /etc/facelock
     sudo touch "$cfg"
@@ -478,11 +497,17 @@ do_edit_config() {
       sleep 1
       ;;
     nvim | vim | nano | micro | hx | helix | fresh)
-      sudo "$ed" "$cfg"
+      if command -v sudoedit >/dev/null 2>&1; then
+        SUDO_EDITOR="$ed" sudoedit "$cfg"
+      else
+        sudo "$ed" "$cfg"
+      fi
       ;;
     *)
-      if command -v "$ed" >/dev/null 2>&1; then
-        sudo "$ed" "$cfg" 2>/dev/null || SUDO_EDITOR="$ed" sudoedit "$cfg"
+      if command -v sudoedit >/dev/null 2>&1 && command -v "$ed" >/dev/null 2>&1; then
+        SUDO_EDITOR="$ed" sudoedit "$cfg"
+      elif command -v "$ed" >/dev/null 2>&1; then
+        sudo "$ed" "$cfg"
       else
         sudo nano "$cfg"
       fi
@@ -497,6 +522,11 @@ cmd_edit_config() {
 
 do_set_require_ir() {
   local new_val="$1"
+  if [[ "$new_val" != "true" && "$new_val" != "false" ]]; then
+    echo "Error: Invalid require_ir value (must be true or false): '$new_val'" >&2
+    return 1
+  fi
+
   local cfg="/etc/facelock/config.toml"
   local sudo_cmd=""
   if [[ $EUID -ne 0 ]]; then
@@ -510,8 +540,8 @@ do_set_require_ir() {
     fi
   fi
 
-  if [[ -L "$cfg" ]]; then
-    echo "Error: $cfg is a symlink. Refusing to modify." >&2
+  if [[ -L "$cfg" || -d "$cfg" ]]; then
+    echo "Error: $cfg is a symlink or directory. Refusing to modify." >&2
     return 1
   fi
 
@@ -542,7 +572,15 @@ do_set_require_ir() {
 }
 
 has_ir_camera() {
-  # 1. Unprivileged check via v4l2-ctl for IR typical pixel formats (GREY, Y16, etc.)
+  # 1. Fast check: Check sysfs device names
+  for name_file in /sys/class/video4linux/video*/name; do
+    [[ -f "$name_file" ]] || continue
+    if grep -iq -E "infrared|\bir\b" "$name_file" 2>/dev/null; then
+      return 0
+    fi
+  done
+
+  # 2. Pixel formats check via v4l2-ctl for typical IR formats (GREY, Y16, etc.)
   if command -v v4l2-ctl >/dev/null 2>&1; then
     for dev in /dev/video*; do
       [[ -e "$dev" ]] || continue
@@ -551,14 +589,6 @@ has_ir_camera() {
       fi
     done
   fi
-
-  # 2. Check sysfs device names
-  for name_file in /sys/class/video4linux/video*/name; do
-    [[ -f "$name_file" ]] || continue
-    if grep -iq -E "infrared|\bir\b" "$name_file" 2>/dev/null; then
-      return 0
-    fi
-  done
 
   # 3. Interactive fallback via sudo facelock devices if facelock exists and in terminal
   if [[ -t 0 ]] && command -v facelock >/dev/null 2>&1; then
@@ -626,7 +656,9 @@ cmd_setup() {
 cmd_enroll() {
   local label="${1:-}"
   if [[ -n "$label" ]]; then
-    launch_terminal "sudo facelock enroll -l \"$label\""
+    local escaped_label
+    printf -v escaped_label '%q' "$label"
+    launch_terminal "sudo facelock enroll -l $escaped_label"
   else
     launch_terminal "sudo facelock enroll"
   fi
@@ -650,9 +682,15 @@ cmd_models() {
 
 cmd_remove() {
   local id="$1"
-  if [[ -n "$id" ]]; then
-    launch_terminal "sudo facelock remove $id -y"
+  if [[ -z "$id" ]]; then
+    echo "Error: Model ID is required." >&2
+    return 1
   fi
+  if [[ ! "$id" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+    echo "Error: Invalid model ID: $id" >&2
+    return 1
+  fi
+  launch_terminal "sudo facelock remove $id -y"
 }
 
 cmd_clear() {
@@ -669,6 +707,11 @@ cmd_hyprlock_toggle() {
 
 cmd_set_require_ir() {
   local new_val="${1:-true}"
+  if [[ "$new_val" != "true" && "$new_val" != "false" ]]; then
+    echo "Error: Invalid require_ir value (must be true or false): $new_val" >&2
+    return 1
+  fi
+
   local cfg="/etc/facelock/config.toml"
 
   # Don't change require_ir to true if already true or commented out (enabled by default)
@@ -686,14 +729,14 @@ cmd_set_require_ir() {
 
   # Desktop polkit agent prompt via pkexec
   if command -v pkexec >/dev/null 2>&1; then
-    if pkexec bash -c "$(declare -f do_set_require_ir); do_set_require_ir $new_val" 2>/dev/null; then
+    if pkexec bash -c "$(declare -f do_set_require_ir); do_set_require_ir \"\$1\"" bash "$new_val" 2>/dev/null; then
       return 0
     fi
   fi
 
   # Terminal presentation fallback
   local helper_path="$0"
-  launch_terminal "echo 'Updating require_ir in /etc/facelock/config.toml...'; sudo bash -c \"\$(declare -f do_set_require_ir); do_set_require_ir $new_val\" && echo '✓ require_ir set to $new_val' && sleep 1"
+  launch_terminal "echo 'Updating require_ir in /etc/facelock/config.toml...'; sudo bash '$helper_path' do-set-require-ir $new_val && echo '✓ require_ir set to $new_val' && sleep 1"
 }
 
 cmd_require_ir_toggle() {
@@ -711,8 +754,8 @@ cmd_daemon_restart() {
 }
 
 cmd_run() {
-  local subcommand="$1"
-  shift
+  local subcommand="${1:-}"
+  shift || true
   case "$subcommand" in
     status)
       launch_terminal "sudo facelock status"
@@ -730,7 +773,8 @@ cmd_run() {
       launch_terminal "sudo facelock config"
       ;;
     *)
-      launch_terminal "sudo facelock $*"
+      echo "Error: Unknown or unsupported facelock subcommand: $subcommand" >&2
+      return 1
       ;;
   esac
 }
