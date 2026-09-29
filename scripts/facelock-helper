@@ -39,6 +39,9 @@ get_require_ir() {
   echo "true"
 }
 
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/facelock"
+DISMISS_PAM_FILE="$STATE_DIR/dismiss_lock_explorer_pam"
+
 is_lock_explorer_installed() {
   if [[ -d "$HOME/.config/omarchy/plugins/io.github.sirjul1337.lock-explorer" ]]; then
     return 0
@@ -54,6 +57,53 @@ is_lock_explorer_installed() {
   return 1
 }
 
+is_lock_explorer_enabled() {
+  if command -v omarchy-shell >/dev/null 2>&1; then
+    local plugins_json
+    plugins_json=$(timeout 1.5s omarchy-shell shell listPlugins 2>/dev/null || true)
+    if [[ -n "$plugins_json" ]]; then
+      if jq -e '.[] | select(.id == "io.github.sirjul1337.lock-explorer" and .enabled == true)' <<<"$plugins_json" >/dev/null 2>&1; then
+        return 0
+      else
+        return 1
+      fi
+    fi
+  fi
+
+  if command -v omarchy >/dev/null 2>&1; then
+    local plugins_json
+    plugins_json=$(timeout 1.5s omarchy plugin list --json 2>/dev/null || true)
+    if [[ -n "$plugins_json" ]]; then
+      if jq -e '.[] | select(.id == "io.github.sirjul1337.lock-explorer" and .enabled == true)' <<<"$plugins_json" >/dev/null 2>&1; then
+        return 0
+      else
+        return 1
+      fi
+    fi
+  fi
+
+  if ! is_lock_explorer_installed; then
+    return 1
+  fi
+
+  if [[ -f "$HOME/.config/omarchy/shell.json" ]]; then
+    if jq -e '.disabledPlugins // [] | index("io.github.sirjul1337.lock-explorer")' "$HOME/.config/omarchy/shell.json" >/dev/null 2>&1; then
+      return 1
+    fi
+  fi
+
+  return 0
+}
+
+is_lock_explorer_dismissed() {
+  [[ -f "$DISMISS_PAM_FILE" ]]
+}
+
+cmd_dismiss_lock_explorer_pam() {
+  mkdir -p "$STATE_DIR"
+  touch "$DISMISS_PAM_FILE"
+}
+
 is_lock_face_pam_installed() {
   [[ -f "/etc/pam.d/omarchy-lock-face" ]]
 }
@@ -64,9 +114,19 @@ cmd_status() {
     lock_explorer_installed=true
   fi
 
+  local lock_explorer_enabled=false
+  if is_lock_explorer_enabled; then
+    lock_explorer_enabled=true
+  fi
+
   local lock_face_pam_exists=false
   if is_lock_face_pam_installed; then
     lock_face_pam_exists=true
+  fi
+
+  local lock_explorer_dismissed=false
+  if is_lock_explorer_dismissed; then
+    lock_explorer_dismissed=true
   fi
 
   local has_ir=false
@@ -90,7 +150,9 @@ cmd_status() {
   "requireIr": true,
   "hasIrCamera": $has_ir,
   "lockExplorerInstalled": $lock_explorer_installed,
-  "lockFacePamExists": $lock_face_pam_exists
+  "lockExplorerEnabled": $lock_explorer_enabled,
+  "lockFacePamExists": $lock_face_pam_exists,
+  "lockExplorerDismissed": $lock_explorer_dismissed
 }
 EOF
     return 0
@@ -156,7 +218,9 @@ EOF
   "requireIr": $require_ir,
   "hasIrCamera": $has_ir,
   "lockExplorerInstalled": $lock_explorer_installed,
-  "lockFacePamExists": $lock_face_pam_exists
+  "lockExplorerEnabled": $lock_explorer_enabled,
+  "lockFacePamExists": $lock_face_pam_exists,
+  "lockExplorerDismissed": $lock_explorer_dismissed
 }
 EOF
 }
@@ -219,45 +283,47 @@ do_install_lock_face_pam() {
   echo "=== Install Lock Screen Support ==="
   echo ""
   echo "Setting up /etc/pam.d/omarchy-lock-face for Lock Screen Explorer..."
-  local tmp
-  tmp=$(mktemp)
-  trap 'rm -f "$tmp"' EXIT
-  cat << 'EOF' > "$tmp"
+
+  # Pre-check: Reject if target is a symlink (prevent symlink redirection attacks)
+  if [[ -L "$target" ]]; then
+    echo "Error: Destination $target is a symlink. Refusing to write." >&2
+    sleep 2
+    return 1
+  fi
+
+  local sudo_cmd=""
+  if [[ $EUID -ne 0 ]]; then
+    sudo_cmd="sudo"
+  fi
+
+  # Perform update from a root-owned staging area directly inside root-restricted /etc/pam.d
+  # and atomically replace destination with no-follow semantics (-T).
+  if $sudo_cmd bash -c '
+    set -eo pipefail
+    target="/etc/pam.d/omarchy-lock-face"
+    if [[ -L "$target" ]]; then
+      echo "Error: $target is a symlink" >&2
+      exit 1
+    fi
+    stage_file=$(mktemp -p /etc/pam.d .omarchy-lock-face.tmp.XXXXXX)
+    chmod 0644 "$stage_file"
+    chown root:root "$stage_file"
+    cat << "EOF" > "$stage_file"
 #%PAM-1.0
 
 -auth      sufficient                  pam_facelock.so
 auth       required                    pam_deny.so
 account    include                     system-local-login
 EOF
-
-  local ref_file="/etc/pam.d/sudo"
-  [[ ! -f "$ref_file" ]] && ref_file="/etc/pam.d/other"
-
-  local perms="644"
-  local owner="root"
-  local group="root"
-
-  if [[ -f "$ref_file" ]]; then
-    perms=$(stat -c "%a" "$ref_file" 2>/dev/null || echo "644")
-    owner=$(stat -c "%U" "$ref_file" 2>/dev/null || echo "root")
-    group=$(stat -c "%G" "$ref_file" 2>/dev/null || echo "root")
-  fi
-
-  chmod "$perms" "$tmp"
-  if sudo cp "$tmp" "$target"; then
-    sudo chown "$owner:$group" "$target" 2>/dev/null || true
-    sudo chmod "$perms" "$target" 2>/dev/null || true
-    rm -f "$tmp"
+    mv -T "$stage_file" "$target"
+  '; then
     echo ""
     echo "✓ Successfully installed $target"
-    echo "  Owner: $owner:$group"
-    echo "  Permissions: $perms"
     echo ""
     echo "Face unlock is now supported with the Lock Screen Explorer plugin."
     sleep 2
     return 0
   else
-    rm -f "$tmp"
     echo ""
     echo "Error: Failed to install $target"
     sleep 2
@@ -275,7 +341,7 @@ do_remove_lock_face_pam() {
   echo "=== Remove Lock Screen Support ==="
   echo ""
 
-  if [[ -f "$target" ]]; then
+  if [[ -e "$target" || -L "$target" ]]; then
     echo "Removing $target..."
     if sudo rm -f "$target"; then
       echo "✓ Lock screen support removed ($target deleted)."
@@ -360,6 +426,15 @@ do_uninstall() {
   sudo rm -rf /var/lib/facelock/enrolled /var/lib/facelock/facelock.db* 2>/dev/null || true
   echo "✓ Enrolled faces data removed."
 
+  # 7. Clean up user state
+  local user_home
+  if [[ -n "$SUDO_USER" ]]; then
+    user_home=$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6 || echo "$HOME")
+  else
+    user_home="$HOME"
+  fi
+  rm -f "${user_home}/.local/state/omarchy/facelock/dismiss_lock_explorer_pam" 2>/dev/null || true
+
   echo ""
   echo "✓ Facelock uninstalled successfully."
   sleep 2
@@ -433,6 +508,11 @@ do_set_require_ir() {
     if [[ ! -f "$cfg" ]] || ! grep -qE '^[[:space:]]*require_ir[[:space:]]*=[[:space:]]*false' "$cfg"; then
       return 0
     fi
+  fi
+
+  if [[ -L "$cfg" ]]; then
+    echo "Error: $cfg is a symlink. Refusing to modify." >&2
+    return 1
   fi
 
   if [[ ! -f "$cfg" ]]; then
@@ -720,6 +800,9 @@ case "${1:-status}" in
     ;;
   do-remove-lock-face-pam)
     do_remove_lock_face_pam
+    ;;
+  dismiss-lock-explorer-pam)
+    cmd_dismiss_lock_explorer_pam
     ;;
   edit-config)
     cmd_edit_config

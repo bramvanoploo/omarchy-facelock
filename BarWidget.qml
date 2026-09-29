@@ -32,10 +32,10 @@ Panel {
 
   function checkLockExplorerPam() {
     if (!root.opened || lockPamPromptShownThisOpen) return
-    if (root.status.lockExplorerInstalled && !root.status.lockFacePamExists && !root.confirmOpen && !root.toolsOverlayOpen) {
+    if (root.status.lockExplorerEnabled && !root.status.lockFacePamExists && !root.status.lockExplorerDismissed && !root.confirmOpen && !root.toolsOverlayOpen) {
       lockPamPromptShownThisOpen = true
       root.askConfirmation(
-        "Lock Screen Explorer detected. Enable face unlock?\n\nThis creates /etc/pam.d/omarchy-lock-face for the Lock Screen Explorer plugin.\n\nIt will be removed automatically when disabling lock screen support or uninstalling facelock.",
+        "The \"Lock Screen Explorer\" plugin is present on your computer. Do you want to enable face unlock from the lockscreen?\n\nAll changes are automatically reverted when disabling lock screen support or uninstalling facelock.",
         "Enable",
         function() {
           root.confirmOpen = false
@@ -45,6 +45,8 @@ Panel {
         function() {
           root.confirmOpen = false
           root.close()
+          root.status.lockExplorerDismissed = true
+          root.runAction("dismiss-lock-explorer-pam")
         }
       )
     }
@@ -589,6 +591,7 @@ Panel {
                 }
 
                 Button {
+                  visible: root.status.lockFacePamExists || root.status.lockExplorerEnabled
                   width: parent.width
                   text: root.status.lockFacePamExists ? "Remove lock screen support" : "Install lock screen support"
                   iconText: root.status.lockFacePamExists ? "󰆴" : "󰌾"
@@ -603,7 +606,7 @@ Panel {
                       )
                     } else {
                       root.askConfirmation(
-                        "Enable lock screen face unlock?\n\nThis creates /etc/pam.d/omarchy-lock-face for the Lock Screen Explorer plugin.\n\nIt will be removed automatically when disabling lock screen support or uninstalling facelock.",
+                        "Are you sure you want to enable face unlock from the lockscreen?\n\nIt will be removed automatically when disabling lock screen support or uninstalling facelock.",
                         "Enable",
                         function() { root.runAction("install-lock-face-pam") }
                       )

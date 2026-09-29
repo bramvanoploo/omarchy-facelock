@@ -14,7 +14,9 @@ function emptyStatus() {
     requireIr: true,
     hasIrCamera: false,
     lockExplorerInstalled: false,
-    lockFacePamExists: false
+    lockExplorerEnabled: false,
+    lockFacePamExists: false,
+    lockExplorerDismissed: false
   }
 }
 
@@ -38,7 +40,9 @@ function parseStatus(raw) {
     base.requireIr = parsed.requireIr !== undefined ? Boolean(parsed.requireIr) : true
     base.hasIrCamera = parsed.hasIrCamera !== undefined ? Boolean(parsed.hasIrCamera) : false
     base.lockExplorerInstalled = Boolean(parsed.lockExplorerInstalled)
+    base.lockExplorerEnabled = Boolean(parsed.lockExplorerEnabled)
     base.lockFacePamExists = Boolean(parsed.lockFacePamExists)
+    base.lockExplorerDismissed = Boolean(parsed.lockExplorerDismissed)
     return base
   } catch (e) {
     return base
