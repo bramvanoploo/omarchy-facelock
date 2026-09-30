@@ -27,6 +27,14 @@ An [Omarchy](https://omarchy.org) status bar plugin to install, configure, and m
   - View detailed system status, TPM status, and run performance benchmarks.
   - Complete uninstall flow with PAM and face model cleanup.
 
+## Non-IR Cameras & Lock Screen Explorer (T2 MacBooks)
+
+On computers without an infrared camera—such as Apple T2 MacBooks and laptops equipped with standard RGB webcams—setting `abort_if_ssh = false` under the `[security]` section in `/etc/facelock/config.toml` is required to get face unlock working reliably with the **Lock Screen Explorer** plugin.
+
+Without `abort_if_ssh = false`, Facelock's caller session provenance checks can reject authentication attempts from the lock screen on these systems. This plugin manages this setting automatically:
+- Disabling the IR camera requirement (`require_ir = false`) automatically adds or sets `abort_if_ssh = false` in `/etc/facelock/config.toml` and restarts `facelock-daemon.service`.
+- Re-enabling the IR requirement automatically removes `abort_if_ssh` and its value, restoring Facelock's default secure posture.
+
 ## Installation
 
 ```bash

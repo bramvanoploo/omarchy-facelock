@@ -51,9 +51,13 @@ Panel {
   }
 
   function applyStatus(raw) {
-    status = Model.parseStatus(raw)
-    if (opened) {
-      checkLockExplorerPam()
+    if (!raw || typeof raw !== "string" || !raw.trim()) return
+    var parsed = Model.parseStatus(raw)
+    if (parsed) {
+      status = parsed
+      if (opened) {
+        checkLockExplorerPam()
+      }
     }
   }
 

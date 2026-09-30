@@ -1,20 +1,16 @@
 #!/usr/bin/env bash
 set -eo pipefail
 
+HELPER_PATH=$(realpath "$0" 2>/dev/null || readlink -f "$0" 2>/dev/null || echo "$0")
+
 check_installed() {
   if ! command -v facelock >/dev/null 2>&1 && [[ ! -x /usr/bin/facelock ]]; then
     return 1
   fi
-  if pacman -Q facelock-bin >/dev/null 2>&1; then
-    echo "facelock-bin"
-    return 0
-  fi
-  if pacman -Q facelock >/dev/null 2>&1; then
-    echo "facelock"
-    return 0
-  fi
-  if pacman -Q facelock-git >/dev/null 2>&1; then
-    echo "facelock-git"
+  local pkg
+  pkg=$(pacman -Q facelock-bin facelock facelock-git 2>/dev/null | awk '{print $1; exit}')
+  if [[ -n "$pkg" ]]; then
+    echo "$pkg"
     return 0
   fi
   echo "facelock"
@@ -24,13 +20,17 @@ check_installed() {
 get_require_ir() {
   local cfg="/etc/facelock/config.toml"
   if [[ -r "$cfg" ]]; then
-    local line val="true"
+    local line val="true" current_section=""
     while IFS= read -r line || [[ -n "$line" ]]; do
       line="${line%%#*}"
       line="${line#"${line%%[![:space:]]*}"}"
       line="${line%"${line##*[![:space:]]}"}"
-      if [[ "$line" =~ ^require_ir[[:space:]]*=[[:space:]]*(true|false) ]]; then
-        val="${BASH_REMATCH[1]}"
+      if [[ "$line" =~ ^\[([a-zA-Z0-9_-]+)\] ]]; then
+        current_section="${BASH_REMATCH[1]}"
+      elif [[ -z "$current_section" || "$current_section" == "security" ]]; then
+        if [[ "$line" =~ ^require_ir[[:space:]]*=[[:space:]]*(true|false) ]]; then
+          val="${BASH_REMATCH[1]}"
+        fi
       fi
     done < "$cfg"
     echo "$val"
@@ -49,6 +49,16 @@ is_lock_explorer_installed() {
 is_lock_explorer_enabled() {
   if ! is_lock_explorer_installed; then
     return 1
+  fi
+
+  local shell_cfg="$HOME/.config/omarchy/shell.json"
+  if [[ -f "$shell_cfg" ]]; then
+    if jq -e '.disabledPlugins // [] | index("io.github.sirjul1337.lock-explorer")' "$shell_cfg" >/dev/null 2>&1; then
+      return 1
+    fi
+    if jq -e '.plugins // [] | index("io.github.sirjul1337.lock-explorer")' "$shell_cfg" >/dev/null 2>&1; then
+      return 0
+    fi
   fi
 
   if command -v omarchy-shell >/dev/null 2>&1; then
@@ -72,12 +82,6 @@ is_lock_explorer_enabled() {
       else
         return 1
       fi
-    fi
-  fi
-
-  if [[ -f "$HOME/.config/omarchy/shell.json" ]]; then
-    if jq -e '.disabledPlugins // [] | index("io.github.sirjul1337.lock-explorer")' "$HOME/.config/omarchy/shell.json" >/dev/null 2>&1; then
-      return 1
     fi
   fi
 
@@ -148,9 +152,11 @@ EOF
 
   local version="unknown"
   if command -v facelock >/dev/null 2>&1; then
-    version=$(facelock --version 2>/dev/null | awk '{print $2}' || echo "unknown")
+    version=$(timeout 1.5s facelock --version 2>/dev/null | awk '{print $2}' || echo "unknown")
     : "${version:=unknown}"
   fi
+  version="${version//\"/}"
+  pkg="${pkg//\"/}"
 
   local configured=false
   if [[ -f /etc/facelock/config.toml ]]; then
@@ -172,7 +178,7 @@ EOF
     [[ "$raw_enrolled" == "true" ]] && enrolled=true
     [[ "$raw_models" =~ ^[0-9]+$ ]] && model_count="$raw_models"
     if [[ -n "$raw_updated" && "$raw_updated" != "null" ]]; then
-      last_updated="\"$raw_updated\""
+      last_updated="\"${raw_updated//\"/}\""
     fi
     configured=true
   fi
@@ -183,7 +189,7 @@ EOF
   fi
 
   local hyprlock_integrated=false
-  if facelock hyprlock status 2>/dev/null | grep -iq "enabled"; then
+  if timeout 1.5s facelock hyprlock status 2>/dev/null | grep -iq "enabled"; then
     hyprlock_integrated=true
   elif grep -qs "pam_facelock" /etc/pam.d/hyprlock 2>/dev/null; then
     hyprlock_integrated=true
@@ -191,6 +197,7 @@ EOF
 
   local require_ir
   require_ir=$(get_require_ir)
+  [[ "$require_ir" == "false" ]] && require_ir="false" || require_ir="true"
 
   cat <<EOF
 {
@@ -223,8 +230,10 @@ launch_terminal() {
 
   local presentation_script="omarchy-show-logo; $cmd; if (( \$? != 130 )); then omarchy-show-done; fi"
 
-  # Ensure the stay_focused rule is loaded in the compositor
-  hyprctl eval 'o.window({ class = "^(org.omarchy.terminal)$", title = "^(Omarchy Facelock.*)$" }, { stay_focused = true })' >/dev/null 2>&1 || true
+  # Ensure the stay_focused rule is loaded in the compositor if Hyprland is active
+  if [[ -n "$HYPRLAND_INSTANCE_SIGNATURE" ]] && command -v hyprctl >/dev/null 2>&1; then
+    hyprctl eval 'o.window({ class = "^(org.omarchy.terminal)$", title = "^(Omarchy Facelock.*)$" }, { stay_focused = true })' >/dev/null 2>&1 || true
+  fi
 
   if command -v uwsm-app >/dev/null 2>&1; then
     setsid uwsm-app -- xdg-terminal-exec --app-id=org.omarchy.terminal --title="Omarchy Facelock" -e bash -c "$presentation_script" >/dev/null 2>&1 &
@@ -235,15 +244,17 @@ launch_terminal() {
   fi
 
   # Proactively focus the terminal as soon as it maps
-  (
-    for _ in {1..20}; do
-      if hyprctl clients -j 2>/dev/null | jq -e '.[] | select(.class == "org.omarchy.terminal" and (.title | startswith("Omarchy Facelock")))' >/dev/null 2>&1; then
-        hyprctl dispatch focuswindow "title:^Omarchy Facelock" >/dev/null 2>&1 || true
-        break
-      fi
-      sleep 0.05
-    done
-  ) &
+  if [[ -n "$HYPRLAND_INSTANCE_SIGNATURE" ]] && command -v hyprctl >/dev/null 2>&1; then
+    (
+      for _ in {1..20}; do
+        if hyprctl clients -j 2>/dev/null | jq -e '.[] | select(.class == "org.omarchy.terminal" and (.title | startswith("Omarchy Facelock")))' >/dev/null 2>&1; then
+          hyprctl dispatch focuswindow "title:^Omarchy Facelock" >/dev/null 2>&1 || true
+          break
+        fi
+        sleep 0.05
+      done
+    ) &
+  fi
 }
 
 do_install() {
@@ -283,8 +294,7 @@ do_install() {
 }
 
 cmd_install() {
-  local helper_path="$0"
-  launch_terminal "bash '$helper_path' do-install"
+  launch_terminal "bash '$HELPER_PATH' do-install"
 }
 
 do_install_lock_face_pam() {
@@ -331,7 +341,7 @@ EOF
     echo "✓ Successfully installed $target"
     echo ""
     echo "Checking facelock-daemon.service..."
-    if ! systemctl status facelock-daemon.service >/dev/null 2>&1; then
+    if ! systemctl is-active --quiet facelock-daemon.service 2>/dev/null; then
       echo "facelock-daemon.service is not running. Starting and enabling service..."
       if [[ $EUID -eq 0 ]]; then
         systemctl enable --now facelock-daemon.service
@@ -355,8 +365,7 @@ EOF
 }
 
 cmd_install_lock_face_pam() {
-  local helper_path="$0"
-  launch_terminal "bash '$helper_path' do-install-lock-face-pam"
+  launch_terminal "bash '$HELPER_PATH' do-install-lock-face-pam"
 }
 
 do_remove_lock_face_pam() {
@@ -387,8 +396,7 @@ do_remove_lock_face_pam() {
 }
 
 cmd_remove_lock_face_pam() {
-  local helper_path="$0"
-  launch_terminal "bash '$helper_path' do-remove-lock-face-pam"
+  launch_terminal "bash '$HELPER_PATH' do-remove-lock-face-pam"
 }
 
 do_uninstall() {
@@ -471,8 +479,7 @@ do_uninstall() {
 }
 
 cmd_uninstall() {
-  local helper_path="$0"
-  launch_terminal "bash '$helper_path' do-uninstall"
+  launch_terminal "bash '$HELPER_PATH' do-uninstall"
 }
 
 do_edit_config() {
@@ -493,6 +500,10 @@ do_edit_config() {
   [[ -f "$default_editor" ]] && read -r ed <"$default_editor"
   : "${ed:=${EDITOR:-nvim}}"
   [[ "$ed" == *"omarchy-launch-editor"* && -f "$default_editor" ]] && read -r ed <"$default_editor"
+  if ! command -v "$ed" >/dev/null 2>&1; then
+    ed="${EDITOR:-nano}"
+    command -v "$ed" >/dev/null 2>&1 || ed="nano"
+  fi
 
   echo "=== Edit Facelock Configuration ==="
   echo "File: $cfg"
@@ -508,14 +519,10 @@ do_edit_config() {
     zed | zeditor)
       echo "Opening in Zed..."
       SUDO_EDITOR="zeditor --wait" sudoedit "$cfg"
-      echo "✓ Configuration saved."
-      sleep 1
       ;;
     code | codium | vscodium)
       echo "Opening in $ed..."
       SUDO_EDITOR="${ed} --wait" sudoedit "$cfg"
-      echo "✓ Configuration saved."
-      sleep 1
       ;;
     nvim | vim | nano | micro | hx | helix | fresh)
       if command -v sudoedit >/dev/null 2>&1; then
@@ -535,25 +542,31 @@ do_edit_config() {
       ;;
   esac
 
+  sudo chmod 0644 "$cfg" 2>/dev/null || true
+
   local after_hash=""
   if [[ -f "$cfg" ]]; then
     after_hash=$(sha256sum "$cfg" 2>/dev/null || true)
   fi
 
   if [[ "$before_hash" != "$after_hash" ]]; then
+    echo ""
     echo "Configuration modified. Restarting facelock-daemon.service..."
     if command -v sudo >/dev/null 2>&1; then
       sudo systemctl restart facelock-daemon.service 2>/dev/null || true
     else
       systemctl restart facelock-daemon.service 2>/dev/null || true
     fi
-    echo "✓ Restarted facelock-daemon.service."
+    echo "✓ Configuration saved and daemon restarted."
+  else
+    echo ""
+    echo "Notice: No changes were made."
   fi
+  sleep 1
 }
 
 cmd_edit_config() {
-  local helper_path="$0"
-  launch_terminal "bash '$helper_path' do-edit-config"
+  launch_terminal "bash '$HELPER_PATH' do-edit-config"
 }
 
 do_set_require_ir() {
@@ -595,6 +608,7 @@ do_set_require_ir() {
     else
       printf '[security]\n# require_ir = true\n' | $sudo_cmd tee "$cfg" >/dev/null
     fi
+    $sudo_cmd chmod 0644 "$cfg" 2>/dev/null || true
     if command -v sudo >/dev/null 2>&1; then
       sudo systemctl restart facelock-daemon.service 2>/dev/null || true
     else
@@ -634,6 +648,8 @@ do_set_require_ir() {
     fi
   fi
 
+  $sudo_cmd chmod 0644 "$cfg" 2>/dev/null || true
+
   if command -v sudo >/dev/null 2>&1; then
     sudo systemctl restart facelock-daemon.service 2>/dev/null || true
   else
@@ -650,7 +666,17 @@ has_ir_camera() {
     fi
   done
 
-  # 2. Pixel formats check via v4l2-ctl for typical IR formats (GREY, Y16, etc.)
+  # 2. Check udev properties for IR keywords
+  if command -v udevadm >/dev/null 2>&1; then
+    for vdev in /sys/class/video4linux/video*; do
+      [[ -d "$vdev" ]] || continue
+      if udevadm info -q property -p "$vdev" 2>/dev/null | grep -iq -E "infrared|\bir\b"; then
+        return 0
+      fi
+    done
+  fi
+
+  # 3. Pixel formats check via v4l2-ctl for typical IR formats (GREY, Y16, etc.)
   if command -v v4l2-ctl >/dev/null 2>&1; then
     for dev in /dev/video*; do
       [[ -e "$dev" ]] || continue
@@ -660,9 +686,9 @@ has_ir_camera() {
     done
   fi
 
-  # 3. Interactive fallback via sudo facelock devices if facelock exists and in terminal
-  if [[ -t 0 ]] && command -v facelock >/dev/null 2>&1; then
-    if sudo facelock devices 2>/dev/null | grep -q '\[IR\]'; then
+  # 4. If running as root, facelock devices can be directly queried safely without prompting sudo
+  if [[ $EUID -eq 0 ]] && command -v facelock >/dev/null 2>&1; then
+    if timeout 1.5s facelock devices 2>/dev/null | grep -q '\[IR\]'; then
       return 0
     fi
   fi
@@ -719,8 +745,7 @@ do_setup() {
 }
 
 cmd_setup() {
-  local helper_path="$0"
-  launch_terminal "bash '$helper_path' do-setup"
+  launch_terminal "bash '$HELPER_PATH' do-setup"
 }
 
 cmd_enroll() {
@@ -812,9 +837,7 @@ cmd_set_require_ir() {
   fi
 
   # Terminal presentation fallback
-  local helper_path
-  helper_path=$(realpath "$0" 2>/dev/null || readlink -f "$0" 2>/dev/null || echo "$0")
-  launch_terminal "echo 'Updating require_ir in /etc/facelock/config.toml...'; sudo bash '$helper_path' do-set-require-ir $new_val && echo '✓ require_ir set to $new_val' && sleep 1"
+  launch_terminal "echo 'Updating require_ir in /etc/facelock/config.toml...'; sudo bash '$HELPER_PATH' do-set-require-ir $new_val && echo '✓ require_ir set to $new_val' && sleep 1"
 }
 
 cmd_require_ir_toggle() {

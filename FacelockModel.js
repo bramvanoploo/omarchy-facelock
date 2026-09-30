@@ -22,11 +22,17 @@ function emptyStatus() {
 
 function parseStatus(raw) {
   var base = emptyStatus()
-  if (!raw || typeof raw !== "string") return base
+  if (!raw || typeof raw !== "string") return null
 
   try {
-    var parsed = JSON.parse(raw.trim())
-    if (typeof parsed !== "object" || parsed === null) return base
+    var text = raw.trim()
+    var start = text.indexOf('{')
+    var end = text.lastIndexOf('}')
+    if (start !== -1 && end !== -1 && end > start) {
+      text = text.substring(start, end + 1)
+    }
+    var parsed = JSON.parse(text)
+    if (typeof parsed !== "object" || parsed === null) return null
 
     base.installed = Boolean(parsed.installed)
     base.version = String(parsed.version || "")
@@ -46,14 +52,20 @@ function parseStatus(raw) {
     base.lockExplorerDismissed = Boolean(parsed.lockExplorerDismissed)
     return base
   } catch (e) {
-    return base
+    return null
   }
 }
 
 function parseList(raw) {
   if (!raw || typeof raw !== "string") return []
   try {
-    var parsed = JSON.parse(raw.trim())
+    var text = raw.trim()
+    var start = text.indexOf('[')
+    var end = text.lastIndexOf(']')
+    if (start !== -1 && end !== -1 && end > start) {
+      text = text.substring(start, end + 1)
+    }
+    var parsed = JSON.parse(text)
     if (Array.isArray(parsed)) return parsed
     return []
   } catch (e) {
@@ -77,6 +89,7 @@ function tooltip(status) {
   if (!status || !status.installed) return "Facelock · Not installed (click to install)"
   if (!status.configured) return "Facelock · Setup needed"
   if (!status.enrolled) return "Facelock · No face enrolled"
+  if (!status.daemonRunning) return "Facelock · Daemon inactive (" + status.modelCount + (status.modelCount === 1 ? " model)" : " models)")
   return "Facelock · Enrolled (" + status.modelCount + (status.modelCount === 1 ? " model)" : " models)")
 }
 
