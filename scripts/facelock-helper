@@ -178,7 +178,7 @@ EOF
   fi
 
   local daemon_running=false
-  if systemctl is-active --quiet facelock 2>/dev/null; then
+  if systemctl is-active --quiet facelock-daemon.service 2>/dev/null || systemctl is-active --quiet facelock 2>/dev/null; then
     daemon_running=true
   fi
 
@@ -330,6 +330,19 @@ EOF
     echo ""
     echo "✓ Successfully installed $target"
     echo ""
+    echo "Checking facelock-daemon.service..."
+    if ! systemctl status facelock-daemon.service >/dev/null 2>&1; then
+      echo "facelock-daemon.service is not running. Starting and enabling service..."
+      if [[ $EUID -eq 0 ]]; then
+        systemctl enable --now facelock-daemon.service
+      else
+        sudo systemctl enable --now facelock-daemon.service
+      fi
+      echo "✓ Started and enabled facelock-daemon.service."
+    else
+      echo "✓ facelock-daemon.service is already running."
+    fi
+    echo ""
     echo "Face unlock is now supported with the Lock Screen Explorer plugin."
     sleep 2
     return 0
@@ -400,7 +413,10 @@ do_uninstall() {
   fi
 
   # 3. Stop and disable daemon if active
-  if systemctl is-active --quiet facelock 2>/dev/null || systemctl is-enabled --quiet facelock 2>/dev/null; then
+  if systemctl is-active --quiet facelock-daemon.service 2>/dev/null || systemctl is-enabled --quiet facelock-daemon.service 2>/dev/null; then
+    echo "Stopping and disabling facelock daemon..."
+    sudo systemctl disable --now facelock-daemon.service 2>/dev/null || true
+  elif systemctl is-active --quiet facelock 2>/dev/null || systemctl is-enabled --quiet facelock 2>/dev/null; then
     echo "Stopping and disabling facelock daemon..."
     sudo systemctl disable --now facelock 2>/dev/null || true
   fi
@@ -566,7 +582,9 @@ do_set_require_ir() {
     fi
   fi
 
-  if systemctl is-active --quiet facelock 2>/dev/null; then
+  if systemctl is-active --quiet facelock-daemon.service 2>/dev/null; then
+    $sudo_cmd systemctl restart facelock-daemon.service 2>/dev/null || true
+  elif systemctl is-active --quiet facelock 2>/dev/null; then
     $sudo_cmd systemctl restart facelock 2>/dev/null || true
   fi
 }
