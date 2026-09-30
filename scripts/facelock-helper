@@ -499,6 +499,11 @@ do_edit_config() {
   echo "Editor: $ed"
   echo ""
 
+  local before_hash=""
+  if [[ -f "$cfg" ]]; then
+    before_hash=$(sha256sum "$cfg" 2>/dev/null || true)
+  fi
+
   case "${ed##*/}" in
     zed | zeditor)
       echo "Opening in Zed..."
@@ -529,6 +534,21 @@ do_edit_config() {
       fi
       ;;
   esac
+
+  local after_hash=""
+  if [[ -f "$cfg" ]]; then
+    after_hash=$(sha256sum "$cfg" 2>/dev/null || true)
+  fi
+
+  if [[ "$before_hash" != "$after_hash" ]]; then
+    echo "Configuration modified. Restarting facelock-daemon.service..."
+    if command -v sudo >/dev/null 2>&1; then
+      sudo systemctl restart facelock-daemon.service 2>/dev/null || true
+    else
+      systemctl restart facelock-daemon.service 2>/dev/null || true
+    fi
+    echo "✓ Restarted facelock-daemon.service."
+  fi
 }
 
 cmd_edit_config() {
@@ -549,9 +569,16 @@ do_set_require_ir() {
     sudo_cmd="sudo"
   fi
 
-  # Don't change require_ir to true if already true or commented out (enabled by default)
+  # Don't change require_ir to true if already true/default and abort_if_ssh is not present
   if [[ "$new_val" == "true" ]]; then
-    if [[ ! -f "$cfg" ]] || ! grep -qE '^[[:space:]]*require_ir[[:space:]]*=[[:space:]]*false' "$cfg"; then
+    if [[ ! -f "$cfg" ]] || (! grep -qE '^[[:space:]]*require_ir[[:space:]]*=[[:space:]]*false' "$cfg" && ! grep -qE '^[#[:space:]]*abort_if_ssh[[:space:]]*=' "$cfg"); then
+      return 0
+    fi
+  fi
+
+  # Don't change require_ir to false if already false and abort_if_ssh is already false
+  if [[ "$new_val" == "false" && -f "$cfg" ]]; then
+    if grep -qE '^[[:space:]]*require_ir[[:space:]]*=[[:space:]]*false' "$cfg" && grep -qE '^[[:space:]]*abort_if_ssh[[:space:]]*=[[:space:]]*false' "$cfg"; then
       return 0
     fi
   fi
@@ -563,16 +590,30 @@ do_set_require_ir() {
 
   if [[ ! -f "$cfg" ]]; then
     $sudo_cmd mkdir -p /etc/facelock
-    printf '[security]\nrequire_ir = %s\n' "$new_val" | $sudo_cmd tee "$cfg" >/dev/null
-    return $?
+    if [[ "$new_val" == "false" ]]; then
+      printf '[security]\nrequire_ir = false\nabort_if_ssh = false\n' | $sudo_cmd tee "$cfg" >/dev/null
+    else
+      printf '[security]\n# require_ir = true\n' | $sudo_cmd tee "$cfg" >/dev/null
+    fi
+    if command -v sudo >/dev/null 2>&1; then
+      sudo systemctl restart facelock-daemon.service 2>/dev/null || true
+    else
+      systemctl restart facelock-daemon.service 2>/dev/null || true
+    fi
+    return 0
   fi
 
   if [[ "$new_val" == "true" ]]; then
-    # Comment out or reset require_ir back to default
+    # Reset require_ir back to default
     if grep -qE '^[[:space:]]*require_ir[[:space:]]*=' "$cfg"; then
       $sudo_cmd sed -i -E "s/^[[:space:]]*require_ir[[:space:]]*=.*/# require_ir = true/" "$cfg"
     fi
+    # Remove abort_if_ssh and its value from configuration file
+    if grep -qE '^[#[:space:]]*abort_if_ssh[[:space:]]*=' "$cfg"; then
+      $sudo_cmd sed -i -E "/^[#[:space:]]*abort_if_ssh[[:space:]]*=/d" "$cfg"
+    fi
   else
+    # Set require_ir = false
     if grep -qE '^[#[:space:]]*require_ir[[:space:]]*=' "$cfg"; then
       $sudo_cmd sed -i -E "s/^[#[:space:]]*require_ir[[:space:]]*=.*/require_ir = false/" "$cfg"
     elif grep -qE '^\[security\]' "$cfg"; then
@@ -580,12 +621,23 @@ do_set_require_ir() {
     else
       printf '\n[security]\nrequire_ir = false\n' | $sudo_cmd tee -a "$cfg" >/dev/null
     fi
+
+    # Set or add abort_if_ssh = false in [security] section
+    if grep -qE '^[#[:space:]]*abort_if_ssh[[:space:]]*=' "$cfg"; then
+      $sudo_cmd sed -i -E "s/^[#[:space:]]*abort_if_ssh[[:space:]]*=.*/abort_if_ssh = false/" "$cfg"
+    elif grep -qE '^[[:space:]]*require_ir[[:space:]]*=' "$cfg"; then
+      $sudo_cmd sed -i -E "/^[[:space:]]*require_ir[[:space:]]*=/a abort_if_ssh = false" "$cfg"
+    elif grep -qE '^\[security\]' "$cfg"; then
+      $sudo_cmd sed -i -E "/^\[security\]/a abort_if_ssh = false" "$cfg"
+    else
+      printf 'abort_if_ssh = false\n' | $sudo_cmd tee -a "$cfg" >/dev/null
+    fi
   fi
 
-  if systemctl is-active --quiet facelock-daemon.service 2>/dev/null; then
-    $sudo_cmd systemctl restart facelock-daemon.service 2>/dev/null || true
-  elif systemctl is-active --quiet facelock 2>/dev/null; then
-    $sudo_cmd systemctl restart facelock 2>/dev/null || true
+  if command -v sudo >/dev/null 2>&1; then
+    sudo systemctl restart facelock-daemon.service 2>/dev/null || true
+  else
+    systemctl restart facelock-daemon.service 2>/dev/null || true
   fi
 }
 
@@ -732,9 +784,16 @@ cmd_set_require_ir() {
 
   local cfg="/etc/facelock/config.toml"
 
-  # Don't change require_ir to true if already true or commented out (enabled by default)
+  # Don't change require_ir to true if already true/default and abort_if_ssh is not present
   if [[ "$new_val" == "true" ]]; then
-    if [[ ! -f "$cfg" ]] || ! grep -qE '^[[:space:]]*require_ir[[:space:]]*=[[:space:]]*false' "$cfg"; then
+    if [[ ! -f "$cfg" ]] || (! grep -qE '^[[:space:]]*require_ir[[:space:]]*=[[:space:]]*false' "$cfg" && ! grep -qE '^[#[:space:]]*abort_if_ssh[[:space:]]*=' "$cfg"); then
+      return 0
+    fi
+  fi
+
+  # Don't change require_ir to false if already false and abort_if_ssh is already false
+  if [[ "$new_val" == "false" && -f "$cfg" ]]; then
+    if grep -qE '^[[:space:]]*require_ir[[:space:]]*=[[:space:]]*false' "$cfg" && grep -qE '^[[:space:]]*abort_if_ssh[[:space:]]*=[[:space:]]*false' "$cfg"; then
       return 0
     fi
   fi
@@ -753,7 +812,8 @@ cmd_set_require_ir() {
   fi
 
   # Terminal presentation fallback
-  local helper_path="$0"
+  local helper_path
+  helper_path=$(realpath "$0" 2>/dev/null || readlink -f "$0" 2>/dev/null || echo "$0")
   launch_terminal "echo 'Updating require_ir in /etc/facelock/config.toml...'; sudo bash '$helper_path' do-set-require-ir $new_val && echo '✓ require_ir set to $new_val' && sleep 1"
 }
 

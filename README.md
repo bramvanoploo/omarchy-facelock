@@ -20,7 +20,7 @@ An [Omarchy](https://omarchy.org) status bar plugin to install, configure, and m
   - Add or remove face unlock support for the Lock Screen Explorer plugin (`/etc/pam.d/omarchy-lock-face`).
 - **Hardware & IR Detection**:
   - Automatic hardware detection for infrared (IR) cameras.
-  - One-click toggle for `require_ir` in `/etc/facelock/config.toml`.
+  - One-click toggle for `require_ir` in `/etc/facelock/config.toml` (automatically manages `abort_if_ssh = false` under `[security]` when disabled).
 - **System & Security Tools**:
   - Quick access to edit `/etc/facelock/config.toml` in your configured system editor.
   - Restart daemon (`facelock daemon restart`).
